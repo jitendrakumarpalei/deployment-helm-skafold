@@ -38,6 +38,11 @@ Use plan-mode to manage execution: create a plan that at minimum tracks the acti
 - **Deliverables:** Logs demonstrating trace IDs and billing events per step; sample invoices from `BillingManager.generateInvoice()`; updated dashboards or queries if applicable.
 - **Exit Criteria:** Billing totals match forecasts, and observability tooling displays the new step graph without gaps.
 
+### Phase 4.5 – Scenario Coverage (Examples)
+- **Tree-of-thought agent:** Branch generation → expansion → evaluation → synthesis. Each branch and depth expansion must emit a separate `step` with correct `unitCost` and `quantity`. Our regression in `packages/framework/tests/billing.test.js` asserts that the invoice contains the root, per-branch expansion, per-branch evaluation, and final selection line items with the expected totals (`0.0155`).
+- **Tool-augmented agent:** Demonstrated by the coffee name generator. The smoke test creates a scaffolded project, runs `node build.js`, and verifies the bundled API function plus static assets under `.vercel/output/`.
+- **Backup validation:** Any new agent should include at least one automated test similar to the above, proving that billing metadata survives end-to-end execution.
+
 ### Phase 5 – Validation & Hardening
 - **Objective:** Prove resilience for success and failure paths before shipping.
 - **Primary Tasks:** Add focused unit/integration tests; exercise error cases (MCP outages, LLM timeouts, bad inputs) inside wrapped steps; perform peer reviews; capture refinements in `SPEC.md`.

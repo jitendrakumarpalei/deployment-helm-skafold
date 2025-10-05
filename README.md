@@ -6,8 +6,8 @@ Comprehensive reference implementation of the stringcost agent framework, a Next
 
 ```
 apps/
-  web/                        # Next.js (Pages Router) demo app
-    pages/                    # UI + API routes
+  web/                        # Next.js demo (Pages Router)
+    pages/                    # UI + API routes (coffee agent example)
     public/                   # Static UI served via .vercel/output/static
     server/                   # Shared agent invocation + serverless handler entry
 packages/
@@ -38,7 +38,7 @@ This installs dependencies for the root and every workspace (`apps/web`, `packag
 | --- | --- |
 | `npm run dev:web` | Runs the Next.js dev server (Pages Router) on port 3000. |
 | `npm run build` | Builds every workspace (framework via tsup, CLI via tsc, Next.js via `next build`). |
-| `npm run test` | Executes the workspace test scripts. The framework package uses `node --test` to verify billing behaviour. |
+| `npm run test` | Runs framework tests **and** a CLI smoke test that scaffolds a project, runs its build, and confirms `.vercel/output`. |
 | `node build.js` | Packages the project into the Vercel Build Output API format under `.vercel/output/`. |
 
 ## Working with the Next.js Demo (`apps/web`)
@@ -89,7 +89,7 @@ node build.js             # creates .vercel/output
 4. Bundles `apps/web/server/coffee-handler.ts` with `esbuild` into `.vercel/output/functions/api/agents/coffee.func/index.js` and writes the accompanying `.vc-config.json` pointing at the Node.js 18 runtime.
 5. Writes `.vercel/output/config.json` with `version: 3`.
 
-Resulting tree:
+Resulting tree (after the smoke test or `node build.js`):
 
 ```
 .vercel/output/
@@ -118,8 +118,8 @@ Vercel will consume the `.vercel/output/` directory as-is, so no additional buil
 
 ## Testing & Validation
 
-- `npm run test --workspace @stringcost/framework` executes the billing/unit tests via Node’s test runner. These tests pull from the compiled bundle (`dist/`) to mimic production usage.
-- `npm run test` runs every workspace script (web + CLI currently print placeholders).
+- `npm run test --workspace @stringcost/framework` executes Node-based unit tests covering billing, error attribution, and a *tree-of-thought* scenario that ensures each branch is individually metered.
+- `npm run test` first runs all workspace scripts, then a **CLI smoke test** that scaffolds a fresh project, links the local framework, runs `node build.js`, and asserts the expected `.vercel/output` structure.
 - You can manually hit the agent API after `npm run dev:web` via `curl`:
 
   ```bash

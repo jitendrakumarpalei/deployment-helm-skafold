@@ -559,10 +559,10 @@ function slugify(value: string): string {
 }
 
 function sanitizeNumber(value: unknown, fallback: number): number {
-  if (typeof value === 'number' && Number.isFinite(value)) {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
     return value;
   }
-  return fallback;
+  return fallback >= 0 ? fallback : 0;
 }
 
 function serializeError(error: unknown): Record<string, unknown> {

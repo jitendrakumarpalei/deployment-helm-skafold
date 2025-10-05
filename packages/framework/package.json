@@ -7,10 +7,12 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     },
     "./mock": {
+      "types": "./dist/mock/index.d.ts",
       "import": "./dist/mock/index.mjs",
       "require": "./dist/mock/index.js"
     }

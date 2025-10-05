@@ -32,6 +32,50 @@ test('BillingManager aggregates totals with default calculator', () => {
   assert.equal(invoice.lineItems.length, 2);
 });
 
+test('BillingManager sanitizes invalid numeric inputs', () => {
+  const manager = new BillingManager();
+
+  // Negative values should be sanitized to 0
+  manager.record({
+    stepName: 'Negative Test',
+    actionType: 'test',
+    unitCost: -1,
+    quantity: 2,
+  });
+
+  // NaN should be sanitized to 0
+  manager.record({
+    stepName: 'NaN Test',
+    actionType: 'test',
+    unitCost: NaN,
+    quantity: 2,
+  });
+
+  // Infinity should be sanitized to 0
+  manager.record({
+    stepName: 'Infinity Test',
+    actionType: 'test',
+    unitCost: Infinity,
+    quantity: 1,
+  });
+
+  // Valid positive value
+  manager.record({
+    stepName: 'Valid Test',
+    actionType: 'test',
+    unitCost: 0.5,
+    quantity: 2,
+  });
+
+  const invoice = manager.generateInvoice();
+  assert.equal(invoice.total, 1.0);
+  assert.equal(invoice.lineItems.length, 4);
+  assert.equal(invoice.lineItems[0].unitCost, 0);
+  assert.equal(invoice.lineItems[1].unitCost, 0);
+  assert.equal(invoice.lineItems[2].unitCost, 0);
+  assert.equal(invoice.lineItems[3].unitCost, 0.5);
+});
+
 test('createAgent propagates invoice via AgentExecutionError on failure', async () => {
   const failingAgent = createAgent('failing', async (step) => {
     await step(
