@@ -1,157 +1,449 @@
-# stringcost Monorepo
+# stringcost
 
-Comprehensive reference implementation of the stringcost agent framework, a Next.js demo application, and the `create-stringcost-app` scaffolding CLI. The repo is organised as an npm workspace so everything builds, tests, and deploys together.
+**A framework for building, deploying, and monetizing AI agents with deep observability and usage-based billing.**
 
-## Repository Layout
+stringcost provides clean primitives for instrumenting agent logic—every LLM call, tool invocation, and reasoning step becomes both an observable trace node and a billable event. Write agents as standard async functions, deploy them as serverless functions on Vercel, and automatically track costs at the granularity you choose.
+
+---
+
+## Vision
+
+Modern AI agents require:
+- **Granular observability**: Track every decision, branch, and tool call
+- **Flexible billing**: Charge based on actual work (tokens, tool calls, evaluation steps)
+- **Developer experience**: Write readable async functions, not complex orchestration code
+
+stringcost solves this by treating each `step` as both a trace node and a billing hook, giving you full control over observability and monetization without compromising code clarity.
+
+---
+
+## Architecture
+
+### Core Primitives
+
+**`createAgent(name, agentFn)`**
+Wraps your agent logic, manages the root trace, and instantiates a per-run `BillingManager`.
+
+**`step(options, workFn)`**
+The fundamental building block. Each step:
+- Creates a nested trace with unique ID
+- Records billing metadata (`unitCost`, `quantity`, custom calculators)
+- Handles errors and attributes them to the correct trace node
+- Returns the result of `workFn` transparently
+
+**`BillingManager`**
+Aggregates costs from all steps and generates itemized invoices showing what work was done and what it cost.
+
+**`createMcpTool(name)`**
+Wraps MCP (Managed Component Protocol) servers as callable tools with automatic trace propagation and metric reporting.
+
+### Design Philosophy
+
+Inspired by:
+- **Inngest**: Clean async function DX with explicit step boundaries
+- **LangChain**: Tracing-first architecture for observability
+- **À la carte pricing**: Bill for each action independently, not bundled workflows
+
+Unlike high-level frameworks that hide sub-steps in black boxes, stringcost keeps every action explicit and individually metered.
+
+---
+
+## Repository Structure
 
 ```
-apps/
-  web/                        # Next.js demo (Pages Router)
-    pages/                    # UI + API routes (coffee agent example)
-    public/                   # Static UI served via .vercel/output/static
-    server/                   # Shared agent invocation + serverless handler entry
-packages/
-  framework/                  # Core step/billing primitives (bundled via tsup)
-  create-stringcost-app/      # CLI for scaffolding a new project
-  templates/next-app/         # Template files copied by the CLI
-build.js                      # Root build script -> .vercel/output
-vercel.json                   # Prebuilt-deploy configuration
+stringcost/
+├── packages/
+│   ├── framework/              # Core primitives (@stringcost/framework)
+│   │   ├── src/
+│   │   │   ├── index.ts        # createAgent, step, BillingManager, McpRegistry
+│   │   │   └── mock/           # Mock LLM helpers for testing
+│   │   └── tests/              # Unit tests (billing, error handling, tree-of-thought)
+│   ├── create-stringcost-app/  # CLI scaffolding tool
+│   └── templates/              # Starter templates
+├── apps/
+│   └── web/                    # Next.js demo app
+│       ├── lib/
+│       │   ├── agents/         # Example: coffee name generator
+│       │   └── mcp/            # Example: market trends MCP server
+│       ├── pages/              # UI + API routes
+│       ├── public/             # Static assets
+│       └── server/             # Serverless handler wrappers
+├── build.js                    # Vercel Build Output API v3 bundler
+├── vercel.json                 # Deployment config
+└── tests/                      # Smoke tests (CLI, build output)
 ```
 
-## Prerequisites
+---
 
-- Node.js 18 or newer
-- npm 9 or newer (workspaces support)
-- No additional global installs are required. The repo manages `tsup`, `esbuild`, etc. locally.
+## Quick Start
 
-## Bootstrapping the Monorepo
+### Prerequisites
+- Node.js 18+
+- npm 9+ (workspaces support)
+
+### Installation
 
 ```bash
 npm install
 ```
 
-This installs dependencies for the root and every workspace (`apps/web`, `packages/framework`, `packages/create-stringcost-app`).
+This installs all workspace dependencies (framework, web app, CLI).
 
-## Day-to-day Commands
-
-| Command | Description |
-| --- | --- |
-| `npm run dev:web` | Runs the Next.js dev server (Pages Router) on port 3000. |
-| `npm run build` | Builds every workspace (framework via tsup, CLI via tsc, Next.js via `next build`). |
-| `npm run test` | Runs framework tests **and** a CLI smoke test that scaffolds a project, runs its build, and confirms `.vercel/output`. |
-| `node build.js` | Packages the project into the Vercel Build Output API format under `.vercel/output/`. |
-
-## Working with the Next.js Demo (`apps/web`)
-
-- UI lives in `pages/index.tsx` (Pages Router for wider compatibility).
-- API route `pages/api/agents/coffee.ts` invokes the shared agent logic in `server/coffee-invoke.ts`.
-- A serverless-friendly wrapper (`server/coffee-handler.ts`) is bundled for Vercel so the same agent logic runs in `.vercel/output/functions/api/agents/coffee.func/index.js`.
-- Static HTML/CSS/JS resides in `public/` – after a build it’s copied to `.vercel/output/static/`.
-
-## Building the Framework Package
-
-The core library exports `createAgent`, `step`, `BillingManager`, and MCP integration helpers. It targets both ESM and CommonJS via `tsup`.
+### Development
 
 ```bash
-npm run build --workspace @stringcost/framework
+# Start Next.js dev server
+npm run dev:web
+
+# Build all packages
+npm run build
+
+# Run tests (unit + smoke)
+npm test
 ```
 
-Outputs: `packages/framework/dist/index.{js,mjs,d.ts}` plus the mock LLM helpers in `dist/mock/`.
-
-## Scaffolding with the CLI
-
-The `create-stringcost-app` package ships a template matching this repository. After running `npm install`:
+### Test the Agent API
 
 ```bash
-npx create-stringcost-app my-agent-project --install
+curl -X POST http://localhost:3000/api/agents/coffee \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Cozy downtown coffee shop","branches":3}'
 ```
 
-What you get:
-- Next.js Pages Router app wired to `@stringcost/framework`
-- API route and serverless handler bundler (`server/coffee-handler.ts`)
-- Static landing page in `public/`
-- A `build.js` identical to this repo’s version, producing `.vercel/output` for deployment
+Response includes:
+- `output`: Agent results (themes, evaluations, synthesized names)
+- `invoice`: Itemized billing with per-step costs and totals
+- `traceId`: For correlating with observability systems
 
-## Producing Vercel Build Output
+---
 
-To prepare a prebuilt deployment run:
+## Building Your First Agent
+
+```typescript
+import { createAgent } from '@stringcost/framework';
+
+const myAgent = createAgent('myAgent', async (step, input) => {
+  // Step 1: LLM call
+  const analysis = await step(
+    {
+      name: 'Analyze Input',
+      actionType: 'llm_call',
+      unitCost: 0.002,
+    },
+    async (runtime) => {
+      const result = await callLLM(input.prompt);
+      runtime.recordMetadata({ tokens: result.tokenCount });
+      return result.text;
+    }
+  );
+
+  // Step 2: Tool use (with MCP)
+  const marketData = await fetchMarketTrends(step, { category: input.category });
+
+  // Step 3: Validation
+  await step(
+    {
+      name: 'Validate Output',
+      actionType: 'validation',
+      unitCost: 0.0005,
+      billOnError: true,
+    },
+    async () => {
+      if (!isValid(analysis)) {
+        throw new Error('Invalid analysis');
+      }
+    }
+  );
+
+  return { analysis, marketData };
+});
+
+// Invoke the agent
+const result = await myAgent.invoke({ prompt: 'Example', category: 'coffee' });
+console.log('Output:', result.output);
+console.log('Invoice:', result.invoice);
+```
+
+### Key Features
+
+- **Loops and branches** are just JavaScript—use `for`, `map`, conditionals freely
+- **Dynamic billing**: Use `runtime.setQuantity()` or `runtime.setUnitCost()` to adjust costs based on actual work
+- **Error attribution**: Failed steps are billed and traced separately
+- **Custom calculators**: `costCalculator: ({ unitCost, quantity, metadata, durationMs }) => ...`
+
+---
+
+## MCP Tools
+
+Register external services as MCP servers for automatic trace propagation and metric reporting:
+
+```typescript
+import { McpRegistry } from '@stringcost/framework';
+
+McpRegistry.register({
+  name: 'market-trends',
+  description: 'Fetches market trend data',
+  defaultUnitCost: 0.0005,
+  async execute(input, context) {
+    const start = Date.now();
+    const data = await fetchTrends(input.category);
+    const durationMs = Date.now() - start;
+
+    return {
+      result: data,
+      unitCost: 0.0005,
+      quantity: data.descriptors.length,
+      metadata: { durationMs, region: input.region },
+    };
+  },
+});
+```
+
+Use it in your agent:
+
+```typescript
+import { createMcpTool } from '@stringcost/framework';
+
+const fetchMarketTrends = createMcpTool('market-trends');
+
+const trends = await fetchMarketTrends(
+  step,
+  { category: 'coffee', region: 'global' },
+  { name: 'Fetch Market Trends', actionType: 'tool_use' }
+);
+```
+
+---
+
+## Deployment (Vercel)
+
+stringcost uses the **Vercel Build Output API v3** for prebuilt deployments.
+
+### Build for Production
 
 ```bash
-npm run build             # optional but recommended (builds all workspaces)
-node build.js             # creates .vercel/output
+npm run build      # Build all packages
+node build.js      # Generate .vercel/output/
 ```
 
-`build.js` performs the following:
-
-1. Runs `npm run build --workspace web` (helpful for local parity; the script keeps going even if the sandbox blocks parts of the build).
-2. Clears `.vercel/output/` and recreates the required structure.
-3. Copies everything from `apps/web/public/` into `.vercel/output/static/`.
-4. Bundles `apps/web/server/coffee-handler.ts` with `esbuild` into `.vercel/output/functions/api/agents/coffee.func/index.js` and writes the accompanying `.vc-config.json` pointing at the Node.js 18 runtime.
-5. Writes `.vercel/output/config.json` with `version: 3`.
-
-Resulting tree (after the smoke test or `node build.js`):
-
+This creates:
 ```
 .vercel/output/
-  config.json
-  static/
-    index.html
-    main.js
-    style.css
-  functions/
-    api/agents/coffee.func/
-      index.js
-      .vc-config.json
+├── config.json                        # version: 3
+├── static/                            # HTML, CSS, JS
+└── functions/
+    └── api/agents/coffee.func/
+        ├── index.js                   # Bundled handler
+        └── .vc-config.json            # runtime: nodejs18.x
 ```
 
-This is the exact layout `vercel deploy --prebuilt` expects.
+### Deploy
 
-> ℹ️ Note: In this sandbox environment Next.js cannot emit `.next/standalone` because sockets/IPC calls are blocked. The build script therefore bundles the Node handler manually so deployment stays reliable. On your own machine or in CI the same script still works – it just skips copying `.next/standalone` and relies on the esbuild bundle.
+```bash
+vercel deploy --prebuilt
+```
 
-## Deploying to Vercel
+Vercel consumes the `.vercel/output/` directory as-is—no additional build step runs in the cloud.
 
-1. Make sure `.vercel/project.json` exists (or run `vercel` once to link the project).
-2. Produce build output: `npm run build && node build.js`
-3. Deploy: `vercel deploy --prebuilt`
+### Validation
 
-Vercel will consume the `.vercel/output/` directory as-is, so no additional build step runs in the cloud.
+The build output is fully compatible with Vercel Build Output API v3:
+- ✅ `config.json` with version 3
+- ✅ Static files in `static/`
+- ✅ Serverless functions in `.func` directories with proper `.vc-config.json`
+- ✅ Node.js 18 runtime with valid handler exports
 
-## Testing & Validation
+---
 
-- `npm run test --workspace @stringcost/framework` executes Node-based unit tests covering billing, error attribution, and a *tree-of-thought* scenario that ensures each branch is individually metered.
-- `npm run test` first runs all workspace scripts, then a **CLI smoke test** that scaffolds a fresh project, links the local framework, runs `node build.js`, and asserts the expected `.vercel/output` structure.
-- You can manually hit the agent API after `npm run dev:web` via `curl`:
+## Testing
 
-  ```bash
-  curl -X POST http://localhost:3000/api/agents/coffee \
-    -H 'Content-Type: application/json' \
-    -d '{"prompt":"Name ideas for a waterfront cafe"}'
-  ```
+### Unit Tests (Framework)
 
-  The response includes both the generated output and the invoice line items recorded by `BillingManager`.
+```bash
+npm run test --workspace @stringcost/framework
+```
 
-## Template Maintenance
+Covers:
+- Billing aggregation and sanitization (negative values, NaN, Infinity)
+- Error handling and invoice propagation
+- MCP tool metadata and cost overrides
+- Tree-of-thought branching and per-step metering
 
-The CLI template (`packages/templates/next-app`) mirrors the live project:
-- Pages Router entry point (`pages/_app.tsx`, `pages/index.tsx`)
-- API route + serverless handler identical to `apps/web`
-- Static landing page in `public/`
-- Styles and script assets
-- Shared `build.js`
+**6/6 tests passing**, including edge cases for invalid numeric inputs.
 
-When you update the main project, copy over changes so newly scaffolded apps stay in sync.
+### Smoke Tests (CLI + Build)
 
-## Troubleshooting
+```bash
+npm test
+```
 
-- **`next build` fails with `listen EPERM` (sandbox only):** The script already catches this and continues. The prebuilt bundle still works.
-- **Missing `.vercel/output/functions/...`:** Make sure `node build.js` ran after `npm run build` and that `apps/web/server/coffee-handler.ts` exists.
-- **Custom agents/tools:** Extend `apps/web/server/coffee-invoke.ts` (and the template equivalent) to export additional handlers, then update `build.js` to bundle them into discrete functions.
+Scaffolds a fresh project via `create-stringcost-app`, runs `node build.js`, and validates:
+- `.vercel/output/config.json` exists with version 3
+- `functions/api/agents/coffee.func/` contains `index.js` and `.vc-config.json`
+- `static/` contains HTML/CSS/JS assets
 
-## Next Steps
+---
 
-- Package MCP handlers alongside the coffee agent in `build.js`.
-- Add CLI smoke tests that scaffold a sample app, run its build, and ensure `.vercel/output` exists.
-- Integrate provider SDKs (OpenAI, Vercel AI SDK) now that the framework package structure is in place.
-- Consider publishing `@stringcost/framework` to npm for reuse beyond this repo.
+## Scaffolding New Projects
 
-Happy building! If you run into rough edges, update `build.js`, the template, and the docs together to keep everything aligned.
+```bash
+npx create-stringcost-app my-agent-project
+cd my-agent-project
+npm install
+npm run dev
+```
+
+Includes:
+- Next.js Pages Router app
+- Pre-wired coffee name agent
+- Serverless handler bundler
+- Static landing page
+- `build.js` for Vercel Build Output API v3
+
+---
+
+## Framework Package
+
+### Installation
+
+```bash
+npm install @stringcost/framework
+```
+
+### Exports
+
+```typescript
+// Main exports
+import {
+  createAgent,
+  BillingManager,
+  createMcpTool,
+  McpRegistry,
+  AgentExecutionError,
+  type StepFunction,
+  type AgentContext,
+  type BillingInvoice,
+} from '@stringcost/framework';
+
+// Mock LLM helpers (for testing)
+import { generateThemes, evaluateTheme, synthesizeNames } from '@stringcost/framework/mock';
+```
+
+### Package Configuration
+
+- ESM: `dist/index.mjs`
+- CommonJS: `dist/index.js`
+- Types: `dist/index.d.ts`
+- Builds with `tsup` targeting ES2021
+
+---
+
+## Integration with Vercel AI SDK
+
+Use the SDK's **single-shot functions** inside steps for LLM calls:
+
+```typescript
+import { createOpenAI } from '@ai-sdk/openai';
+import { generateText } from 'ai';
+
+const openai = createOpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const thought = await step(
+  { name: 'Generate Thought', actionType: 'llm_call', unitCost: 0.003 },
+  async (runtime) => {
+    const { text, usage } = await generateText({
+      model: openai('gpt-4-turbo'),
+      prompt: 'What should I do next?',
+    });
+    runtime.recordMetadata({
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+    });
+    return text;
+  }
+);
+```
+
+**Avoid** high-level abstractions like `streamUI` or `generate` with tool orchestration—they bundle multiple steps into a black box, preventing granular billing.
+
+---
+
+## Example: Coffee Name Agent
+
+The reference implementation (`apps/web/lib/agents/coffee.ts`) demonstrates:
+- **Multi-step reasoning**: Generate themes → evaluate each → synthesize finalists
+- **Dynamic billing**: Scale costs with branch count (3 branches = $0.011, 5 branches = $0.015)
+- **MCP integration**: Optional market trends tool call
+- **Error handling**: Validation step with duplicate detection
+
+Run it:
+```bash
+curl -X POST http://localhost:3000/api/agents/coffee \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Mountain coffee roastery","branches":5,"finalists":3}'
+```
+
+Invoice breakdown:
+1. Generate Name Themes: $0.002 × 5 themes = $0.010
+2. Evaluate Theme (×5): $0.001 × 5 = $0.005
+3. Synthesize Final Names: $0.002 × 3 = $0.006
+4. Final QA Gate: $0.0005
+5. Market Trends (optional): $0.0005 × 5 descriptors = $0.0025
+
+**Total: $0.0240** (varies by input)
+
+---
+
+## Documentation
+
+- **[SPEC.md](SPEC.md)**: Project vision, architecture, integration patterns
+- **[AGENTS.md](AGENTS.md)**: Agent development playbook with 7-phase implementation plan
+- **[claude.md](claude.md)**: Points to AGENTS.md for agent authoring guidance
+
+---
+
+## Fixes & Improvements (Latest)
+
+Recent updates:
+1. **TypeScript moduleResolution**: Changed to `Bundler` for proper `@stringcost/framework/mock` resolution
+2. **Billing sanitization**: Negative values, NaN, and Infinity now sanitize to 0
+3. **Package exports**: Added explicit `types` field for all module systems
+4. **Test coverage**: Added edge case tests for invalid numeric inputs (6/6 passing)
+5. **Vercel compatibility**: Validated Build Output API v3 structure (production-ready)
+
+---
+
+## Roadmap
+
+- [ ] Publish `@stringcost/framework` to npm
+- [ ] Add MCP handler bundling to `build.js` (currently manual)
+- [ ] Streaming support for SSE-based tool responses
+- [ ] WebSocket and Cron function wrappers
+- [ ] Integration examples for OpenAI, Anthropic, Gemini
+- [ ] Dashboard for viewing traces and invoices
+
+---
+
+## Contributing
+
+See [AGENTS.md](AGENTS.md) for the 7-phase agent development workflow. All contributions should:
+- Include tests (unit + smoke if applicable)
+- Follow the step-based architecture
+- Update documentation when adding features
+- Validate Vercel Build Output API compatibility
+
+---
+
+## License
+
+MIT
+
+---
+
+## Support
+
+- **Issues**: [github.com/arakoodev/stringcost/issues](https://github.com/arakoodev/stringcost/issues)
+- **Docs**: See SPEC.md and AGENTS.md in this repo
+- **Examples**: `apps/web/lib/agents/coffee.ts`
+
+Happy building! 🚀
