@@ -1,0 +1,17 @@
+{
+  "name": "stringcost",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "vendor/portkey-gateway"
+  ],
+  "scripts": {
+    "build": "npm -ws run build",
+    "test": "npm -ws run test"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3"
+  }
+}
