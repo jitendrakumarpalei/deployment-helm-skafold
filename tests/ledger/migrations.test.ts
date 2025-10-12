@@ -1,20 +1,32 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { Client } from 'pg';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from '../../apps/ledger/src/migrate';
 
-let container: PostgreSqlContainer;
+let container: PostgreSqlContainer | undefined;
 let connectionString: string;
 
-beforeAll(async () => {
-  container = await new PostgreSqlContainer('postgres:16-alpine')
-    .withDatabase('stringcost_test')
-    .withUsername('stringcost')
-    .withPassword('stringcost')
-    .start();
+async function resetDatabase(url: string) {
+  const client = new Client({ connectionString: url });
+  await client.connect();
+  await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
+  await client.end();
+}
 
-  connectionString = container.getConnectionUri();
+beforeAll(async () => {
+  if (process.env.TEST_DATABASE_URL) {
+    connectionString = process.env.TEST_DATABASE_URL;
+  } else {
+    container = await new PostgreSqlContainer('postgres:16-alpine')
+      .withDatabase('stringcost_test')
+      .withUsername('stringcost')
+      .withPassword('stringcost')
+      .start();
+    connectionString = container.getConnectionUri();
+  }
+
   process.env.DATABASE_URL = connectionString;
+  await resetDatabase(connectionString);
   await runMigrations({ databaseUrl: connectionString });
 }, 180_000);
 
