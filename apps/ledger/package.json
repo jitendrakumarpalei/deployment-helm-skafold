@@ -1,0 +1,24 @@
+{
+  "name": "@stringcost/ledger",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "migrate": "tsx src/cli.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "node-pg-migrate": "^7.7.0",
+    "testcontainers": "^10.10.3",
+    "@testcontainers/postgresql": "^10.10.3",
+    "tsx": "^4.7.0",
+    "vitest": "^1.5.0"
+  }
+}
