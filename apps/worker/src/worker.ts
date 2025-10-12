@@ -44,6 +44,7 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
     }
   };
 
+  await processBatch();
   const timer = setInterval(processBatch, config.pollIntervalMs);
 
   return {

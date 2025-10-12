@@ -69,7 +69,6 @@ beforeAll(async () => {
 
   pool = new Pool({ connectionString: databaseUrl });
 
-  workerHandle = await startWorker();
 }, 180_000);
 
 afterAll(async () => {
@@ -93,22 +92,26 @@ describe('LangChain → StringCost Gateway', () => {
     const runId = randomUUID();
     let capturedPrompt = '';
 
-    const fetchProxy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchProxy = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = typeof input === 'string' ? input : input.url;
 
-      if (url.startsWith('http://stringcost.local/llm')) {
-        const target = url.replace('http://stringcost.local', 'http://test');
-        const response = await gatewayApp.request(target, init);
-        if (!response.ok) {
-          const errorBody = await response.text();
-          throw new Error(`Gateway error ${response.status}: ${errorBody}`);
+      if (url.startsWith('http://stringcost.local/llm') || url.startsWith('http://test/llm')) {
+        const headers = new Headers(init.headers || {});
+        if (!headers.has('x-stringcost-provider')) {
+          headers.set('x-stringcost-provider', 'openai');
         }
-        return response;
-      }
+        if (!headers.has('x-stringcost-config')) {
+          headers.set('x-stringcost-config', JSON.stringify({ provider: 'openai' }));
+        }
+        if (!headers.has('Authorization')) {
+          headers.set('Authorization', 'Bearer stringcost-key');
+        }
+        headers.set('x-stringcost-run-id', runId);
+        headers.set('x-stringcost-user-id', 'user-langchain');
+        init = { ...init, headers } as RequestInit;
 
-      if (url.includes('/v1/chat/completions')) {
-        const body = JSON.parse((init?.body as string) ?? '{}');
-        capturedPrompt = body?.messages?.[body.messages.length - 1]?.content ?? '';
+        const body = JSON.parse((init.body as string) ?? '{}');
+        capturedPrompt = body?.messages?.[body.messages.length - 1]?.content ?? body?.prompt ?? '';
 
         await eventCollectorApp.request('/events', {
           method: 'POST',
@@ -132,10 +135,7 @@ describe('LangChain → StringCost Gateway', () => {
               },
             ],
           }),
-          {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          }
+          { status: 200, headers: { 'content-type': 'application/json' } }
         );
       }
 
@@ -148,14 +148,15 @@ describe('LangChain → StringCost Gateway', () => {
 
       throw new Error(`Unexpected fetch call to ${url}`);
     });
-
     vi.spyOn(global, 'fetch' as any).mockImplementation(fetchProxy);
+
+    workerHandle = await startWorker();
 
     const llm = new ChatOpenAI({
       apiKey: 'sk-test',
       model: 'gpt-4o-mini',
       configuration: {
-        baseURL: 'http://stringcost.local/llm/v1',
+        baseURL: 'http://test/llm/v1',
         fetch: fetchProxy as any,
       },
       clientOptions: {
