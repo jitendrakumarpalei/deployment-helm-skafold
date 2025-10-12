@@ -39,7 +39,7 @@
     "test:plugins": "jest plugins/",
     "pre-push": "npm run build && node start-test.js",
     "prepare": "node -e \"if (process.env.NODE_ENV !== 'production'){process.exit(1)} \" || husky",
-    "postinstall": "patch-package"
+    "postinstall": "echo 'skipping patch-package for vendored build'"
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "^5.2.0",
