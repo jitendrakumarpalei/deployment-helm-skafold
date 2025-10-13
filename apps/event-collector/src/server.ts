@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
-import Redis from 'ioredis';
-import { LedgerRepository, createPool } from './db.js';
+import { LedgerRepository, createPool, enqueueClassificationJob } from './db.js';
 import type { LedgerEventInsert } from './db.js';
 
 interface EventPayload extends LedgerEventInsert {
@@ -10,8 +9,6 @@ interface EventPayload extends LedgerEventInsert {
 const app = new Hono();
 
 export const dbPool = createPool();
-export const redisClient = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : undefined;
-const queueKey = process.env.CLASSIFICATION_QUEUE_KEY ?? 'classification_jobs';
 const ledgerRepo = new LedgerRepository(dbPool);
 
 app.post('/events', async (c) => {
@@ -23,16 +20,10 @@ app.post('/events', async (c) => {
 
   const record = await ledgerRepo.insertEvent(payload);
 
-  if (redisClient) {
-    await redisClient.lpush(
-      queueKey,
-      JSON.stringify({
-        logId: record.event_id,
-        promptContent: payload.prompt_content ?? '',
-        timestamp: new Date().toISOString(),
-      })
-    );
-  }
+  await enqueueClassificationJob(dbPool, {
+    logId: record.event_id,
+    promptContent: payload.prompt_content ?? null,
+  });
 
   return c.json(record, 201);
 });

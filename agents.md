@@ -27,8 +27,8 @@ Portkey Gateway (https://github.com/Portkey-AI/gateway) is vendored into the Str
 - **Portkey Gateway (self-hosted library):** Vendored source (e.g., `vendor/portkey-gateway`) built as part of our workspace. We avoid modifying upstream files; configuration is handled via JSON/env injection per https://portkey.ai/docs/integrations/libraries/openai-compatible.
 - **Portkey Observability Hooks:** Configure Portkey "traces" webhooks or log sinks to push request/response metadata (prompt, completion, latency, token counts) to StringCost's Event Collector service. These payloads seed raw ledger events with `action_type = 'unknown'` and capture `provider`, `model`, and token metrics.
 - **GKE Ingress & Load Balancer:** Exposes StringCost's internal APIs (`/api/stringcost`, `/api/v1/meter`, webhooks) and fronts the self-hosted Portkey deployment running within our cluster.
-- **Event Collector Service (GKE Deployment):** Receives Portkey webhook callbacks, authenticates via shared secret, persists raw `LedgerEvents`, and enqueues classification jobs in Redis. Also handles reconciliation if Portkey batches logs.
-- **Message Queue (Memorystore for Redis):** Durable queue (LIST/Stream) storing `{logId, promptContent}` items awaiting meta-LLM classification.
+- **Event Collector Service (GKE Deployment):** Receives Portkey webhook callbacks, authenticates via shared secret, persists raw `LedgerEvents`, and inserts classification jobs into the PostgreSQL `classification_jobs` UNLOGGED table. Also handles reconciliation if Portkey batches logs.
+- **Classification Cache (PostgreSQL UNLOGGED Table):** Acts as a durable-enough queue storing `{logId, promptContent, inserted_at, reserved_at}` awaiting meta-LLM classification (no external Redis dependency).
 - **Background Workers (Cloud Run or GKE Jobs):** Consume classification queue, call meta-LLM, enrich ledger events (`action_type`, revenue tiers).
 - **Billing Ledger (Cloud SQL for PostgreSQL):** Stores `LedgerEvents`, usage aggregations, and invoices. Remains the source of truth for double-entry accounting.
 - **Egress (Cloud NAT Gateway):** Ensures stable outbound IPs for classification meta-LLM calls, Stripe, and any self-hosted Portkey components needing upstream access.
@@ -110,13 +110,25 @@ CREATE TABLE LedgerEvents (
 CREATE INDEX idx_run_id ON LedgerEvents(run_id);
 ```
 
-### 5.2 Classification Job Payload (Redis)
-```json
-{
-  "logId": "evt_uuid_from_postgres",
-  "promptContent": "The full prompt to be classified...",
-  "timestamp": "iso_8601_string"
-}
+### 5.2 Classification Job Payload (PostgreSQL Cache)
+Entries in `classification_jobs` are stored as rows:
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `job_id` | `bigserial` | Primary key |
+| `log_id` | `uuid` | References the ledger event (unique) |
+| `prompt_content` | `text` | Raw prompt to classify |
+| `inserted_at` | `timestamptz` | Defaults to `now()` |
+| `reserved_at` | `timestamptz` | Set when a worker leases the job |
+| `attempts` | `int` | Incremented on each lease |
+
+Example row:
+```sql
+INSERT INTO classification_jobs (log_id, prompt_content)
+VALUES (
+  'a7f2489d-5d1f-4d40-9b35-13c205a8c9d2',
+  'Meta-LLM prompt requiring classification'
+);
 ```
 
 ### 5.3 Usage-Metered Billing Tables (PostgreSQL)
@@ -171,12 +183,12 @@ CREATE INDEX idx_run_id ON LedgerEvents(run_id);
 - `POST /webhook/stripe`: handle Stripe webhooks for payment status.
 
 ## 7. Asynchronous Classification Engine
-A Cloud Run worker consumes Redis jobs, invokes a meta-LLM classifier, and enriches ledger events. Classification enables tiered billing and analytics.
+A Cloud Run worker leases rows from the PostgreSQL `classification_jobs` cache, invokes a meta-LLM classifier, and enriches ledger events. Classification enables tiered billing and analytics.
 
 ### 7.1 Classification Flow
-1. Event Collector receives Portkey webhook payload, writes raw ledger event, and enqueues `{logId, promptContent}`.
-2. Worker pops job, calls meta-LLM (`META_LLM_CLASSIFIER_ENDPOINT`) with prompt: `"Analyze the following prompt. Classify the agent's intent as one of: [chat_completion, tool_selection, synthesis, generation, evaluation]."`
-3. Worker updates `LedgerEvents` row, replacing `action_type = 'unknown'` with the classified intent and updating revenue markup.
+1. Event Collector receives Portkey webhook payload, writes raw ledger event, and inserts `{log_id, prompt_content}` into `classification_jobs`.
+2. Worker leases pending rows (using `FOR UPDATE SKIP LOCKED` semantics), calls the meta-LLM (`META_LLM_CLASSIFIER_ENDPOINT`) with prompt: `"Analyze the following prompt. Classify the agent's intent as one of: [chat_completion, tool_selection, synthesis, generation, evaluation]."`
+3. On success the worker updates the corresponding `LedgerEvents` row and deletes the `classification_jobs` entry; on failure it releases the row for retry.
 
 - **Simple Chatbot:** Portkey logs provide conversation context; classification upgrades ledger row from `unknown` to `chat_completion`.
 - **Tool-Calling (ReAct):** Use Portkey trace metadata to distinguish tool selection vs synthesis prompts, then enrich ledger pricing.
@@ -227,8 +239,8 @@ A Cloud Run worker consumes Redis jobs, invokes a meta-LLM classifier, and enric
 - **Integration Tests:** Use OpenAI-compatible clients to hit the StringCost wrapper endpoints (`/llm/v1/...`) while the wrapper mounts the vendored gateway in-process. Assert full flow: client → wrapper → Portkey handlers → upstream model → webhook/log → ledger entry.
 
 ### 9.2 Asynchronous Classification Worker
-- **Unit:** Mock Redis, DuckDB/Postgres client, meta-LLM. Test successful classification updates, meta-LLM failures (graceful handling, optional requeue), and malformed job payloads.
-- **Integration:** With real (test) Redis and in-memory DuckDB, push job, run worker, ensure `LedgerEvents` row transitions from `unknown` to classified type.
+- **Unit:** Mock the Postgres client and meta-LLM. Test successful classification updates, meta-LLM failures (graceful handling, optional requeue), and malformed job payloads.
+- **Integration:** With a test Postgres instance, insert a row into `classification_jobs`, run the worker, ensure the `LedgerEvents` row transitions from `unknown` to the classified type and the job is removed.
 
 ### 9.3 Double-Entry Ledger (DuckDB for Tests)
 - Initialize fresh in-memory DuckDB with schema per suite.
@@ -244,13 +256,13 @@ A Cloud Run worker consumes Redis jobs, invokes a meta-LLM classifier, and enric
 ## 10. Environment & Local Development
 - **Environment Variables:**
   - Stripe: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`.
-  - Database/Cache: `DATABASE_URL`, `REDIS_URL`.
+  - Database & classification cache: `DATABASE_URL`.
   - LLM Providers: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
   - Portkey Gateway: `PORTKEY_API_KEY`, `PORTKEY_BASE_URL`, `PORTKEY_WEBHOOK_SECRET`, `PORTKEY_PRIVATE_KEY_PATH` (if TLS termination handled in-gateway).
   - Meta LLM Classifier: `META_LLM_CLASSIFIER_ENDPOINT`, `META_LLM_API_KEY`.
 - **Local Stack:**
   - `git submodule update --init --recursive` (or script) to fetch the vendored gateway source.
-  - `docker-compose up -d` for PostgreSQL + Redis.
+  - `docker-compose up -d` for PostgreSQL.
   - `npm install` for dependencies.
   - `npm run dev:gateway` to launch the self-hosted Portkey gateway from source, `npm run dev:event-collector` (Portkey webhook receiver), `npm run dev:worker` (classification worker), `npm run dev:webapp` (Next.js UI/agent playground). For local development, run the gateway directly from the vendored package rather than using the hosted Docker image.
 

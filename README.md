@@ -12,7 +12,7 @@ All headers are brand-neutral (`x-stringcost-*`). The wrapper translates them in
 
 - `apps/gateway`: Brand wrapper that authenticates clients, resolves provider configs, and then hands the request to the vendored Portkey router (imported from `vendor/portkey-gateway`) in-process—no double hop.
 - `apps/control-plane`: Internal API that serves `/v1/account/config` and `/v2/models` so the gateway can hydrate provider credentials and catalog data without exposing Portkey branding.
-- `apps/event-collector`: Receives raw usage events, persists them to the ledger, and enqueues classification jobs in Redis.
+- `apps/event-collector`: Receives raw usage events, persists them to the ledger, and enqueues classification jobs in a PostgreSQL `classification_jobs` cache table.
 - `apps/worker`: Background worker that drains the classification queue, calls the meta classifier, and updates the ledger.
 - `vendor/portkey-gateway`: Clean checkout of https://github.com/Portkey-AI/gateway (Git metadata removed). We track the upstream commit in `PORTKEY_TAG`.
 
@@ -23,7 +23,6 @@ Environment variables:
 | `CONTROL_PLANE_URL` | gateway | Base URL the wrapper calls to resolve provider configs before hitting Portkey |
 | `ALBUS_BASEPATH` | vendored gateway | Mirrors `CONTROL_PLANE_URL` for Portkey’s internal control-plane hooks |
 | `DATABASE_URL` | control-plane, ledger, event-collector, worker | PostgreSQL connection string |
-| `REDIS_URL` | event-collector, worker | Redis connection string for classification queue |
 | `META_LLM_CLASSIFIER_ENDPOINT`, `META_LLM_API_KEY` | worker | HTTP endpoint + key used by the classifier |
 | `WORKER_POLL_INTERVAL_MS`, `WORKER_BATCH_SIZE` | worker | Optional tuning for queue polling |
 
@@ -195,7 +194,7 @@ A virtual key is a pointer to the upstream provider credential you registered in
 
 ## Observability & Billing
 
-Every request routed through the gateway produces a ledger entry (`ledger_events`) and enqueues the prompt for asynchronous classification. Provide meaningful `x-stringcost-run-id`, `x-stringcost-user-id`, and (optionally) `metadata` so invoices and analytics remain attributable. The worker consumes classification jobs from Redis and updates each event’s `action_type` (e.g., `chat_completion`, `tool_selection`, `synthesis`).
+Every request routed through the gateway produces a ledger entry (`ledger_events`) and enqueues the prompt for asynchronous classification. Provide meaningful `x-stringcost-run-id`, `x-stringcost-user-id`, and (optionally) `metadata` so invoices and analytics remain attributable. The worker consumes classification jobs from the PostgreSQL cache and updates each event’s `action_type` (e.g., `chat_completion`, `tool_selection`, `synthesis`). The cache uses an UNLOGGED table (`classification_jobs`) with automatic cleanup: leases expire after a configurable timeout and the worker trims rows older than the configured retention window on every batch.
 
 ## Quick Checklist
 
@@ -221,7 +220,7 @@ For additional configuration knobs (guardrails, conditional routing, streaming, 
 
 ## Google App Engine Deployment
 
-`deploy/appengine/` contains a single-service `app.yaml` (App Engine Flexible) plus detailed instructions for running all processes under PM2 inside one instance. Copy `deploy/appengine/service-account.json.example` to `service-account.json` (or point `SERVICE_ACCOUNT_JSON` at your key). The deploy script reads the `project_id` from that file automatically, so you can simply run:
+`deploy/appengine/` now contains templates for App Engine Standard. Copy `deploy/appengine/service-account.json.example` to `service-account.json` (or point `SERVICE_ACCOUNT_JSON` at your key) **and** copy `deploy/appengine/.env.example` to `deploy/appengine/.env`. Fill in your Cloud SQL socket URL, classifier settings, and (optionally) a Serverless VPC connector if you need private networking. Once the files are populated you can run:
 
 ```bash
 gcloud config set project stringcost
@@ -237,10 +236,10 @@ Install dependencies with `npm install --no-audit --no-fund`.
 The test suite spans multiple workspaces:
 
 - `npm run test --workspace @stringcost/gateway` exercises the wrapper unit tests, including control-plane resolution (`tests/gateway/wrapper.test.ts`).
-- `npm run test --workspace @stringcost/ledger` drives Postgres + Redis backed scenarios (`tests/langchain/proxy.test.ts`, `tests/ledger/*.test.ts`). These rely on **Testcontainers**; ensure a container runtime (Docker or compatible) is available locally or in CI.
+- `npm run test --workspace @stringcost/ledger` drives Postgres-backed scenarios (`tests/langchain/proxy.test.ts`, `tests/ledger/*.test.ts`). These rely on **Testcontainers**; ensure a database-capable container runtime (Docker or compatible) is available locally or in CI.
 - `npm run test --workspace @stringcost/event-collector` and `npm run test --workspace @stringcost/worker` cover API and queue plumbing.
 
-CI (GitHub Actions) provisions PostgreSQL and Redis services so the Testcontainers suites can run without extra setup. When running locally without Docker, export `TEST_DATABASE_URL` and `TEST_REDIS_URL` to point at existing instances; otherwise the tests will fail while trying to launch containers.
+CI (GitHub Actions) provisions PostgreSQL for the integration tests. When running locally without Docker, export `TEST_DATABASE_URL` to point at an existing instance; otherwise the tests will fail while trying to launch containers.
 
 ## Control Plane API Contract
 

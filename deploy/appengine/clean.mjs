@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { rm, stat } from 'node:fs/promises';
+import { rm, stat, readdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,9 +13,24 @@ const targets = [
   'apps/gateway/dist',
   'apps/ledger/dist',
   'apps/worker/dist',
-  'vendor/portkey-gateway/build',
-  'app.yaml'
+  'vendor/portkey-gateway/build'
 ].map((p) => join(ROOT, p));
+
+const serviceDir = join(ROOT, 'deploy/appengine/services');
+
+async function cleanServiceOutputs() {
+  let files = [];
+  try {
+    files = await readdir(serviceDir);
+  } catch {
+    return;
+  }
+  await Promise.all(
+    files
+      .filter((file) => file.endsWith('.yaml') && !file.endsWith('.yaml.tpl'))
+      .map((file) => safeRemove(join(serviceDir, file)))
+  );
+}
 
 async function safeRemove(path) {
   try {
@@ -31,4 +46,5 @@ async function safeRemove(path) {
   for (const target of targets) {
     await safeRemove(target);
   }
+  await cleanServiceOutputs();
 })();

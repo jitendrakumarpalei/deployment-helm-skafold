@@ -1,8 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
-import { RedisContainer } from '@testcontainers/redis';
 import { Pool } from 'pg';
-import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
 import { ChatOpenAI } from '@langchain/openai';
 import { runMigrations as runLedgerMigrations } from '../../apps/ledger/src/migrate';
@@ -13,25 +11,16 @@ import { runWorkerOnce } from '../../apps/worker/src/worker';
 const CONTROL_PLANE_BASE = 'http://control.stringcost.local';
 
 let pgContainer: PostgreSqlContainer | undefined;
-let redisContainer: RedisContainer | undefined;
 let pool: Pool;
-let redisUrl: string;
 let databaseUrl: string;
 let gatewayApp: typeof import('../../apps/gateway/src/app').default;
 let eventCollectorApp: typeof import('../../apps/event-collector/src/server').default;
 let eventDbPool: typeof import('../../apps/event-collector/src/server').dbPool;
-let eventRedis: typeof import('../../apps/event-collector/src/server').redisClient;
 
 async function resetDatabase(url: string) {
   const client = new Pool({ connectionString: url });
   await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
   await client.end();
-}
-
-async function resetRedis(url: string) {
-  const client = new Redis(url);
-  await client.flushall();
-  await client.quit();
 }
 
 async function seedControlPlane(db: Pool) {
@@ -75,18 +64,9 @@ beforeAll(async () => {
     databaseUrl = pgContainer.getConnectionUri();
   }
 
-  if (process.env.TEST_REDIS_URL) {
-    redisUrl = process.env.TEST_REDIS_URL;
-  } else {
-    redisContainer = await new RedisContainer('redis:7-alpine').start();
-    redisUrl = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
-  }
-
   await resetDatabase(databaseUrl);
-  await resetRedis(redisUrl);
 
   process.env.DATABASE_URL = databaseUrl;
-  process.env.REDIS_URL = redisUrl;
   process.env.META_LLM_CLASSIFIER_ENDPOINT = 'http://classifier.local';
   process.env.META_LLM_API_KEY = 'dummy';
   process.env.WORKER_POLL_INTERVAL_MS = '50';
@@ -101,19 +81,12 @@ beforeAll(async () => {
   const eventModule = await import('../../apps/event-collector/src/server');
   eventCollectorApp = eventModule.default;
   eventDbPool = eventModule.dbPool;
-  eventRedis = eventModule.redisClient;
 
 }, 180_000);
 
 afterAll(async () => {
   await pool.end();
-  if (eventRedis) {
-    await eventRedis.quit();
-  }
   await eventDbPool.end();
-  if (redisContainer) {
-    await redisContainer.stop();
-  }
   if (pgContainer) {
     await pgContainer.stop();
   }
@@ -260,5 +233,8 @@ describe('LangChain → StringCost Gateway', () => {
 
     expect(actionType).toBe('synthesis');
     expect(fetchProxy).toHaveBeenCalled();
+
+    const remainingJobs = await pool.query('SELECT COUNT(*)::int AS count FROM classification_jobs');
+    expect(remainingJobs.rows[0].count).toBe(0);
   }, 90_000);
 });

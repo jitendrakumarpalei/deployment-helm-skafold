@@ -1,4 +1,3 @@
-import Redis from 'ioredis';
 import { Pool } from 'pg';
 import { ClassificationQueue } from './queue.js';
 import { classifyPrompt } from './classifier.js';
@@ -21,9 +20,12 @@ async function updateLedgerActionType(
 export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
   const config = loadConfig();
 
-  const redis = new Redis(config.redisUrl);
-  const queue = new ClassificationQueue(redis, config.queueKey);
   const pool = new Pool({ connectionString: config.databaseUrl });
+  const queue = new ClassificationQueue(
+    pool,
+    config.reservationTimeoutMs,
+    config.retentionMs
+  );
 
   const processBatch = () => processJobs(queue, pool, config);
 
@@ -33,7 +35,6 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
   return {
     stop: async () => {
       clearInterval(timer);
-      await redis.quit();
       await pool.end();
     },
   };
@@ -44,35 +45,44 @@ async function processJobs(
   pool: Pool,
   config: WorkerConfig
 ): Promise<void> {
-  const jobs = await queue.dequeue(config.batchSize);
+  const jobs = await queue.lease(config.batchSize);
   if (jobs.length === 0) {
     return;
   }
 
+  const completedJobIds: number[] = [];
   for (const job of jobs) {
     try {
       const classification = await classifyPrompt(
         config.classificationEndpoint,
         config.classificationApiKey,
-        { logId: job.logId, promptContent: job.promptContent }
+        { logId: job.log_id, promptContent: job.prompt_content ?? '' }
       );
-      await updateLedgerActionType(pool, job.logId, classification.action_type);
+      await updateLedgerActionType(pool, job.log_id, classification.action_type);
+      completedJobIds.push(job.job_id);
     } catch (error) {
-      console.error('Failed to classify job', job.logId, error);
+      console.error('Failed to classify job', job.log_id, error);
+      await queue.release(job.job_id);
     }
+  }
+
+  if (completedJobIds.length > 0) {
+    await queue.complete(completedJobIds);
   }
 }
 
 export async function runWorkerOnce(): Promise<void> {
   const config = loadConfig();
-  const redis = new Redis(config.redisUrl);
-  const queue = new ClassificationQueue(redis, config.queueKey);
   const pool = new Pool({ connectionString: config.databaseUrl });
+  const queue = new ClassificationQueue(
+    pool,
+    config.reservationTimeoutMs,
+    config.retentionMs
+  );
 
   try {
     await processJobs(queue, pool, config);
   } finally {
-    await redis.quit();
     await pool.end();
   }
 }

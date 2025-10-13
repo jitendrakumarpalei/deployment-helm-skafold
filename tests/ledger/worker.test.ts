@@ -1,28 +1,17 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
-import { RedisContainer } from '@testcontainers/redis';
-import Redis from 'ioredis';
 import { Pool } from 'pg';
 import { runMigrations } from '../../apps/ledger/src/migrate';
-import { ClassificationQueue } from '../../apps/worker/src/queue';
 import { startWorker } from '../../apps/worker/src/worker';
 
 let pgContainer: PostgreSqlContainer | undefined;
-let redisContainer: RedisContainer | undefined;
 let pool: Pool;
-let redisUrl: string;
 let databaseUrl: string;
 
 async function resetDatabase(url: string) {
   const pool = new Pool({ connectionString: url });
   await pool.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
   await pool.end();
-}
-
-async function resetRedis(url: string) {
-  const client = new Redis(url);
-  await client.flushall();
-  await client.quit();
 }
 
 beforeAll(async () => {
@@ -37,18 +26,9 @@ beforeAll(async () => {
     databaseUrl = pgContainer.getConnectionUri();
   }
 
-  if (process.env.TEST_REDIS_URL) {
-    redisUrl = process.env.TEST_REDIS_URL;
-  } else {
-    redisContainer = await new RedisContainer('redis:7-alpine').start();
-    redisUrl = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
-  }
-
   await resetDatabase(databaseUrl);
-  await resetRedis(redisUrl);
 
   process.env.DATABASE_URL = databaseUrl;
-  process.env.REDIS_URL = redisUrl;
   process.env.META_LLM_CLASSIFIER_ENDPOINT = 'http://classifier.local';
   process.env.META_LLM_API_KEY = 'dummy';
 
@@ -62,22 +42,16 @@ beforeAll(async () => {
     ['11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', 'user-xyz', 'success']
   );
 
-  const redisClient = new Redis(redisUrl);
-  const queue = new ClassificationQueue(redisClient, 'classification_jobs');
-  await queue.enqueue({
-    logId: '11111111-1111-1111-1111-111111111111',
-    promptContent: 'Classify me',
-    timestamp: new Date().toISOString(),
-  });
-  await redisClient.quit();
+  await pool.query(
+    `INSERT INTO classification_jobs (log_id, prompt_content)
+     VALUES ($1, $2)`,
+    ['11111111-1111-1111-1111-111111111111', 'Classify me']
+  );
 });
 
 afterAll(async () => {
   if (pool) {
     await pool.end();
-  }
-  if (redisContainer) {
-    await redisContainer.stop();
   }
   if (pgContainer) {
     await pgContainer.stop();
@@ -111,6 +85,9 @@ describe('Classification worker', () => {
     expect(record.rows[0].action_type).toBe('synthesis');
     expect(classifierSpy).toHaveBeenCalled();
     expect(intervalSpy).toHaveBeenCalled();
+
+    const remainingJobs = await pool.query('SELECT COUNT(*)::int AS count FROM classification_jobs');
+    expect(remainingJobs.rows[0].count).toBe(0);
 
     await worker.stop();
   }, 30_000);

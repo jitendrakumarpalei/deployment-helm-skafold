@@ -23,6 +23,13 @@ else
   echo "[GAE] No service account JSON found at ${KEY_PATH}."
   echo "      Set SERVICE_ACCOUNT_JSON or create deploy/appengine/service-account.json before deploying."
 fi
+CONFIG_RENDERER="${ROOT_DIR}/scripts/render-appengine-configs.mjs"
+ENV_FILE="${APPENGINE_ENV_FILE:-${ROOT_DIR}/deploy/appengine/.env}"
+
+echo "[GAE] Rendering service configs using ${ENV_FILE}..."
+node "${CONFIG_RENDERER}" "${ENV_FILE}"
+echo "[GAE] Service configs generated."
+
 echo "[GAE] Building workspaces before deploy..."
 npm run build >/dev/null
 echo "[GAE] Build complete."

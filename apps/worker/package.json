@@ -13,14 +13,12 @@
   "dependencies": {
     "@hono/node-server": "^1.11.0",
     "hono": "^4.6.10",
-    "ioredis": "^5.4.1",
     "pg": "^8.12.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
     "testcontainers": "^10.10.3",
     "@testcontainers/postgresql": "^10.10.3",
-    "@testcontainers/redis": "^10.10.3",
     "tsx": "^4.7.0",
     "vitest": "^1.5.0"
   }

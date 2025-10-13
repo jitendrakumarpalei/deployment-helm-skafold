@@ -1,13 +1,10 @@
 import { serve } from '@hono/node-server';
-import app, { dbPool, redisClient } from './server.js';
+import app, { dbPool } from './server.js';
 
 const port = Number(process.env.PORT ?? 8080);
 
 process.on('SIGTERM', async () => {
   await dbPool.end();
-  if (redisClient) {
-    await redisClient.quit();
-  }
   process.exit(0);
 });
 

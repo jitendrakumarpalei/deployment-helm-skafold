@@ -85,3 +85,19 @@ export function createPool(connectionString?: string): Pool {
   }
   return new Pool({ connectionString: connection });
 }
+
+export async function enqueueClassificationJob(
+  pool: Pool,
+  job: { logId: string; promptContent: string | null }
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO classification_jobs (log_id, prompt_content)
+     VALUES ($1, $2)
+     ON CONFLICT (log_id) DO UPDATE SET
+       prompt_content = EXCLUDED.prompt_content,
+       inserted_at = now(),
+       reserved_at = NULL,
+       attempts = 0`,
+    [job.logId, job.promptContent]
+  );
+}

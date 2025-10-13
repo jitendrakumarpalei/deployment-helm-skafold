@@ -14,9 +14,6 @@ const sharedEnv = {
   DATABASE_URL:
     process.env.DATABASE_URL ??
     'postgres://stringcost:stringcost@127.0.0.1:5432/stringcost',
-  REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
-  CLASSIFICATION_QUEUE_KEY:
-    process.env.CLASSIFICATION_QUEUE_KEY ?? 'classification_jobs',
 };
 
 module.exports = {
