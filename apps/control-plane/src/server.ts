@@ -13,6 +13,21 @@ function extractApiKey(c: any): string | null {
   return c.req.header('x-stringcost-api-key') || null;
 }
 
+interface ProviderModelRow {
+  provider: string;
+  virtual_key: string;
+  model_name: string;
+  display_name: string | null;
+  description: string | null;
+}
+
+interface ProviderCredentialRow {
+  provider: string;
+  virtual_key: string;
+  provider_api_key: string;
+  metadata: unknown;
+}
+
 app.get('/v2/models', async (c) => {
   const apiKey = extractApiKey(c);
   if (!apiKey) {
@@ -29,7 +44,7 @@ app.get('/v2/models', async (c) => {
   }
   const clientId = clientRow.rows[0].id;
 
-  const { rows } = await pool.query(
+  const { rows } = await pool.query<ProviderModelRow>(
     `SELECT pc.provider, pc.virtual_key, pm.model_name, pm.display_name, pm.description
        FROM provider_credentials pc
        JOIN provider_models pm ON pm.provider = pc.provider
@@ -68,7 +83,7 @@ app.get('/v1/account/config', async (c) => {
   }
   const clientId = clientResult.rows[0].id;
 
-  const credentialResult = await pool.query(
+  const credentialResult = await pool.query<ProviderCredentialRow>(
     `SELECT provider, virtual_key, provider_api_key, metadata
        FROM provider_credentials
       WHERE api_client_id = $1

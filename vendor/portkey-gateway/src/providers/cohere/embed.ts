@@ -1,5 +1,6 @@
 import { ErrorResponse, ProviderConfig } from '../types';
 import { EmbedParams, EmbedResponse } from '../../types/embedRequestBody';
+import type { Params } from '../../types/requestBody';
 import { generateErrorResponse } from '../utils';
 import { COHERE } from '../../globals';
 

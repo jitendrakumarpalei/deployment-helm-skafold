@@ -1,4 +1,5 @@
 import { RequestHandler } from '../types';
+import type { Params } from '../../types/requestBody';
 import { GoogleBatchRecord } from './types';
 import { getModelAndProvider, isEmbeddingModel } from './utils';
 import { responseTransformers } from '../open-ai-base';

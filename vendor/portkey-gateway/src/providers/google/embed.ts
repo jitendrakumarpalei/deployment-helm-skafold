@@ -1,5 +1,6 @@
 import { ErrorResponse, ProviderConfig } from '../types';
 import { EmbedParams, EmbedResponse } from '../../types/embedRequestBody';
+import type { Params } from '../../types/requestBody';
 import { GOOGLE } from '../../globals';
 import {
   GoogleErrorResponse,

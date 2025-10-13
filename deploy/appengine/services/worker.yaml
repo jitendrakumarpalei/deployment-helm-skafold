@@ -1,0 +1,15 @@
+runtime: nodejs22
+service: worker
+entrypoint: npm run gae:start:worker
+basic_scaling:
+  max_instances: 1
+  idle_timeout: 10m
+env_variables:
+  NODE_ENV: production
+  DATABASE_URL: YOUR_PRODUCTION_DATABASE_URL
+  REDIS_URL: YOUR_REDIS_URL
+  CLASSIFICATION_QUEUE_KEY: classification_jobs
+  META_LLM_CLASSIFIER_ENDPOINT: https://classifier.yourdomain.com/api/classify
+  META_LLM_API_KEY: YOUR_CLASSIFIER_TOKEN
+  WORKER_POLL_INTERVAL_MS: "500"
+  WORKER_BATCH_SIZE: "5"

@@ -1,0 +1,13 @@
+runtime: nodejs22
+service: default
+entrypoint: npm run gae:start:gateway
+automatic_scaling:
+  max_instances: 3
+  min_instances: 1
+env_variables:
+  NODE_ENV: production
+  DATABASE_URL: YOUR_PRODUCTION_DATABASE_URL
+  REDIS_URL: YOUR_REDIS_URL
+  META_LLM_CLASSIFIER_ENDPOINT: https://classifier.yourdomain.com/api/classify
+  META_LLM_API_KEY: YOUR_CLASSIFIER_TOKEN
+  CLASSIFICATION_QUEUE_KEY: classification_jobs

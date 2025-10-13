@@ -221,7 +221,14 @@ For additional configuration knobs (guardrails, conditional routing, streaming, 
 
 ## Google App Engine Deployment
 
-`deploy/appengine/` contains a single-service `app.yaml` (App Engine Flexible) plus detailed instructions for running all processes under PM2 inside one instance. Copy `deploy/appengine/service-account.json.example` to `service-account.json` (or point `SERVICE_ACCOUNT_JSON` at your key). The deploy script reads the `project_id` from that file automatically, so you can simply run `npm run gae:deploy` (or pass `--project` to override). Review `deploy/appengine/README.md` for environment variables and deployment details.
+`deploy/appengine/` contains a single-service `app.yaml` (App Engine Flexible) plus detailed instructions for running all processes under PM2 inside one instance. Copy `deploy/appengine/service-account.json.example` to `service-account.json` (or point `SERVICE_ACCOUNT_JSON` at your key). The deploy script reads the `project_id` from that file automatically, so you can simply run:
+
+```bash
+gcloud config set project stringcost
+npm run gae:deploy
+```
+
+Run `npm run gae:clean` afterwards if you want to remove the compiled artifacts (`apps/*/dist`, `vendor/portkey-gateway/build`, and the staged `app.yaml`). Review `deploy/appengine/README.md` for environment variables and deployment details.
 
 ## Local Development & Tests
 

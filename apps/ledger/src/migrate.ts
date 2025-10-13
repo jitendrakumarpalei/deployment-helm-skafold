@@ -30,7 +30,6 @@ export async function runMigrations(options: MigrationOptions = {}): Promise<voi
     dir: migrationsDir,
     direction,
     migrationsTable: 'schema_migrations',
-    migrationFileExtension: 'cjs',
     count,
     dryRun,
     verbose: true,

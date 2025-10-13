@@ -1,4 +1,5 @@
 import { ErrorResponse, ProviderConfig } from '../types';
+import type { Params } from '../../types/requestBody';
 import {
   EmbedResponse,
   EmbedResponseData,

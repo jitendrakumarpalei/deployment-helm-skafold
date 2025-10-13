@@ -1,6 +1,7 @@
 import { WORKERS_AI } from '../../globals';
 import { EmbedParams, EmbedResponse } from '../../types/embedRequestBody';
 import { ErrorResponse, ProviderConfig } from '../types';
+import type { Params } from '../../types/requestBody';
 import { generateInvalidProviderResponseError } from '../utils';
 import {
   WorkersAiErrorResponse,

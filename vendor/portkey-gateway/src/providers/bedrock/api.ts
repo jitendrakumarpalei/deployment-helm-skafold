@@ -1,5 +1,5 @@
 import { Context } from 'hono';
-import { Options } from '../../types/requestBody';
+import { Options, Params } from '../../types/requestBody';
 import { endpointStrings, ProviderAPIConfig } from '../types';
 import { bedrockInvokeModels } from './constants';
 import {

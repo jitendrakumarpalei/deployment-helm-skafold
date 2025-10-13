@@ -59,17 +59,16 @@ npm run deploy:start
 
 Use `pm2 status` / `pm2 logs` to inspect the processes. Press `Ctrl+C` to exit; PM2 Runtime will shut everything down gracefully.
 
-## Google App Engine (Flexible) Deployment
+## Google App Engine (Standard) Deployment
 
-If you prefer App Engine Flexible, reuse the same build/start scripts:
+App Engine now runs as four services in the Standard environment (`gateway`, `control-plane`, `event-collector`, `worker`) plus an optional `dispatch.yaml`. The configs live under `deploy/appengine/services/`. Each service uses the scripts we expose in the root package.json (for example, `npm run gae:start:gateway`).
 
-- **Configuration:** see `appengine/app.yaml` for the single-service definition (PM2-managed processes, forwarded internal ports).
-- **Entry point:** `npm run gae:start` builds all workspaces and launches `pm2-runtime deploy/ecosystem.config.cjs`.
-
-Deploy with:
+Deploy everything in one shot:
 
 ```bash
-npm run gae:deploy -- --project YOUR_PROJECT_ID
+gcloud config set project <PROJECT_ID>
+npm run gae:deploy
+npm run gae:clean   # optional cleanup of dist/ + staged bundles
 ```
 
-Before running the command, copy `deploy/appengine/service-account.json.example` to `deploy/appengine/service-account.json` (or set `SERVICE_ACCOUNT_JSON=/path/to/key.json`) and fill in your real service-account credentials. The deploy script will call `gcloud auth activate-service-account --key-file <file>` automatically and, if you don’t pass `--project`, it will use the `project_id` from that JSON. Update the environment variables inside `app.yaml` (Cloud SQL, Memorystore, classifier endpoint) before deploying. Refer to `appengine/README.md` for required values and local verification tips.
+Before deploying, copy `deploy/appengine/service-account.json.example` to `deploy/appengine/service-account.json` (or set `SERVICE_ACCOUNT_JSON=/path/to/key.json`) and fill in your real service-account credentials. Update the environment variables inside each service YAML with your production database, Redis, and classifier settings. `deploy/appengine/dispatch.yaml` can be tailored to your custom domain. See `deploy/appengine/README.md` for service-by-service details and local run commands.

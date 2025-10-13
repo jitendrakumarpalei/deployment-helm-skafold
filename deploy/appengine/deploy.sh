@@ -2,22 +2,15 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/../.. && pwd)"
-APP_YAML_SOURCE="${ROOT_DIR}/deploy/appengine/app.yaml"
-APP_YAML_TARGET="${ROOT_DIR}/app.yaml"
+SERVICE_CONFIGS=(
+  "${ROOT_DIR}/deploy/appengine/services/gateway.yaml"
+  "${ROOT_DIR}/deploy/appengine/services/control-plane.yaml"
+  "${ROOT_DIR}/deploy/appengine/services/event-collector.yaml"
+  "${ROOT_DIR}/deploy/appengine/services/worker.yaml"
+)
+DISPATCH_CONFIG="${ROOT_DIR}/deploy/appengine/dispatch.yaml"
 
 cd "${ROOT_DIR}"
-
-cleanup() {
-  if [[ -f "${APP_YAML_TARGET}" ]]; then
-    rm -f "${APP_YAML_TARGET}"
-  fi
-}
-trap cleanup EXIT
-
-echo "[GAE] Building workspaces..."
-npm run build
-
-cp "${APP_YAML_SOURCE}" "${APP_YAML_TARGET}"
 
 KEY_PATH="${SERVICE_ACCOUNT_JSON:-${ROOT_DIR}/deploy/appengine/service-account.json}"
 PROJECT_FROM_JSON=""
@@ -30,9 +23,15 @@ else
   echo "[GAE] No service account JSON found at ${KEY_PATH}."
   echo "      Set SERVICE_ACCOUNT_JSON or create deploy/appengine/service-account.json before deploying."
 fi
-
+echo "[GAE] Building workspaces before deploy..."
+npm run build >/dev/null
+echo "[GAE] Build complete."
 echo "[GAE] Deploying via gcloud app deploy..."
-deploy_args=("${APP_YAML_TARGET}")
+
+deploy_args=("${SERVICE_CONFIGS[@]}")
+if [[ -f "${DISPATCH_CONFIG}" ]]; then
+  deploy_args+=("${DISPATCH_CONFIG}")
+fi
 if [[ "${PROJECT_FROM_JSON}" != "" ]]; then
   has_project_flag=false
   for arg in "$@"; do

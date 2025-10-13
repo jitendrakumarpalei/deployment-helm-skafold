@@ -1,5 +1,6 @@
 import { OLLAMA } from '../../globals';
 import { EmbedResponse } from '../../types/embedRequestBody';
+import type { Params } from '../../types/requestBody';
 import { ErrorResponse, ProviderConfig } from '../types';
 import {
   generateErrorResponse,

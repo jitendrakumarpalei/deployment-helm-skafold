@@ -13,7 +13,15 @@ function parseConfig(headerValue: string | null): any | null {
 }
 
 async function ensureProviderHeaders(headers: Headers): Promise<void> {
-  const controlPlaneUrl = process.env.CONTROL_PLANE_URL ?? null;
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT;
+  const defaultControlPlaneUrl = projectId
+    ? `https://control-plane-dot-${projectId}.appspot.com`
+    : null;
+  const controlPlaneUrl = process.env.CONTROL_PLANE_URL ?? defaultControlPlaneUrl;
+
+  if (!process.env.ALBUS_BASEPATH && controlPlaneUrl) {
+    process.env.ALBUS_BASEPATH = controlPlaneUrl;
+  }
 
   let provider = headers.get('x-stringcost-provider') ?? undefined;
   const configHeader = headers.get('x-stringcost-config');
@@ -48,7 +56,8 @@ async function ensureProviderHeaders(headers: Headers): Promise<void> {
   if (apiKeyHeader) controlHeaders.set('x-stringcost-api-key', apiKeyHeader);
 
   const query = provider ? `?provider=${encodeURIComponent(provider)}` : '';
-  const resp = await fetch(`${controlPlaneUrl.replace(/\/$/, '')}/v1/account/config${query}`, {
+  const baseControlPlaneUrl = controlPlaneUrl!;
+  const resp = await fetch(`${baseControlPlaneUrl.replace(/\/$/, '')}/v1/account/config${query}`, {
     headers: controlHeaders,
   });
 

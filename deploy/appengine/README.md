@@ -1,71 +1,61 @@
-# Google App Engine (Flexible) Deployment
+# Google App Engine (Standard) Deployment
 
-This configuration runs **all StringCost services inside a single App Engine flexible-service instance**. A PM2 “cloud” ecosystem supervises the four processes (gateway, control plane, event collector, worker) and keeps them within the same VM.
+StringCost now deploys as **four separate App Engine Standard services** (gateway, control plane, event collector, worker) plus a `dispatch.yaml` that routes custom domains. Each service boots its own Node.js 22 instance and runs a single Hono app; the gateway remains the only public endpoint.
 
 ## Files
 
-- `app.yaml` – App Engine flexible config (runtime `nodejs`, `env: flex`, entrypoint `npm run gae:start`). It forwards ports 8790/8791 for the internal services and exposes the gateway on port 8080.
-- `../ecosystem.config.cjs` – Shared PM2 configuration used by both Render and GAE deployments. It binds:
-  - Gateway → `process.env.PORT` (default 8080 on GAE)
-  - Control plane → `CONTROL_PLANE_PORT` (defaults to 8790)
-  - Event collector → `EVENT_COLLECTOR_PORT` (defaults to 8791)
-  - Worker → background loop (no HTTP listener)
+- `services/gateway.yaml` – External `/llm/v1/*` proxy
+- `services/control-plane.yaml` – Internal config & model catalog API
+- `services/event-collector.yaml` – Ledger ingestion & classification queue producer
+- `services/worker.yaml` – Background classifier loop (basic scaling, single instance)
+- `dispatch.yaml` – Optional domain routing (e.g., `api.stringcost.com`)
+- `service-account.json.example` – Template for the deploy key consumed by `npm run gae:deploy`
 
 ## Prerequisites
 
-1. Enable App Engine flexible: `gcloud app create --region=<REGION>`
-2. Provision backing services:
-   - Cloud SQL (PostgreSQL); get a connection string or use the Cloud SQL Proxy.
-   - Memorystore for Redis (or a compatible Redis service reachable from App Engine).
-   - Meta-LLM classifier endpoint reachable over HTTPS.
-3. Copy `service-account.json.example` to `service-account.json` (or provide a path via `SERVICE_ACCOUNT_JSON`) and paste your actual service account key contents. **Never commit the real key.** The deploy script will read `project_id` from this JSON unless you pass `--project` explicitly.
-4. Update the placeholders in `app.yaml` with real URLs/tokens.
+1. Enable App Engine Standard: `gcloud app create --region=<REGION>`
+2. Provision backing services (Cloud SQL/PostgreSQL, Memorystore/Redis, classifier endpoint).
+3. Copy `deploy/appengine/service-account.json.example` to `deploy/appengine/service-account.json` (or point `SERVICE_ACCOUNT_JSON` at another path) and paste your real key. The deploy script reads `project_id` from this file automatically.
+4. Edit each YAML in `deploy/appengine/services/` and replace the placeholder environment variable values (Postgres URL, Redis URL, classifier endpoint/key, etc.).
+5. Update `dispatch.yaml` to match your domain if you plan to expose the services publicly.
 
 ## Deploy
 
 ```bash
-gcloud config set project YOUR_PROJECT_ID
-npm run gae:deploy -- --project YOUR_PROJECT_ID
+gcloud config set project <PROJECT_ID>
+npm run gae:deploy
+npm run gae:clean    # optional cleanup of dist/ and staged artifacts
 ```
 
-App Engine will:
-1. Run `npm install --production`
-2. Execute the `entrypoint` (`npm run gae:start`) which:
-   - Builds all workspaces (`npm run build`)
-   - Launches `pm2-runtime deploy/ecosystem.config.cjs`
-
-The instance exposes:
-
-- `https://<project>.appspot.com/llm/v1/*` → gateway
-- Internal calls (control plane, event collector) run on `http://127.0.0.1:<PORT>` inside the VM; `CONTROL_PLANE_URL` is pre-set accordingly.
+`npm run gae:deploy` builds the workspaces, activates the configured service account, and deploys all four service configs plus `dispatch.yaml` in a single gcloud invocation.
 
 ## Environment Variables
 
-Edit `app.yaml` and substitute:
+Each service YAML defines the variables it needs. Common ones:
 
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | PostgreSQL connection string (use Cloud SQL Auth Proxy or private IP). |
-| `REDIS_URL` | Redis connection string (Memorystore URI). |
-| `META_LLM_CLASSIFIER_ENDPOINT` / `META_LLM_API_KEY` | URL + token for the classifier service. |
-| `CLASSIFICATION_QUEUE_KEY` | Redis list key (defaults to `classification_jobs`). |
-| `WORKER_POLL_INTERVAL_MS`, `WORKER_BATCH_SIZE` | Optional worker tuning knobs. |
+| Variable | Service(s) | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | control-plane, event-collector, worker, gateway | PostgreSQL connection string |
+| `REDIS_URL` | gateway, event-collector, worker | Redis/queue connection |
+| `CLASSIFICATION_QUEUE_KEY` | gateway, event-collector, worker | Redis list name (default `classification_jobs`) |
+| `META_LLM_CLASSIFIER_ENDPOINT` / `META_LLM_API_KEY` | gateway, worker | External classifier endpoint & auth |
+| `CONTROL_PLANE_URL`, `ALBUS_BASEPATH` | gateway | Leave empty to auto-resolve `https://control-plane-dot-<PROJECT_ID>.appspot.com` |
 
-Additional optional overrides:
+The worker service uses `basic_scaling` with a single instance; adjust `WORKER_POLL_INTERVAL_MS` or `WORKER_BATCH_SIZE` if needed.
 
-- `CONTROL_PLANE_PORT`, `EVENT_COLLECTOR_PORT` – change the internal ports.
-- `CONTROL_PLANE_URL`, `ALBUS_BASEPATH` – override the loopback URLs.
-- `GATEWAY_PORT` – only if you must expose a different port (App Engine expects 8080).
+## Local Verification
 
-## Local Dry Run
+You can run each service locally with the new scripts:
 
 ```bash
-export DATABASE_URL=postgres://stringcost:stringcost@127.0.0.1:5432/stringcost
-export REDIS_URL=redis://127.0.0.1:6379
-export CONTROL_PLANE_PORT=8790
-export EVENT_COLLECTOR_PORT=8791
-npm install
-npm run gae:start
+npm run gae:start:control-plane
+npm run gae:start:event-collector
+npm run gae:start:gateway
+npm run gae:start:worker
 ```
 
-PM2 Runtime will boot the four processes together. Use `pm2 logs` to inspect output, and `Ctrl+C` to stop. Ensure the same env vars you plan to use in production are present before running locally.
+Provide the same environment variables you plan to deploy (e.g., point `DATABASE_URL` and `REDIS_URL` at local instances). Stop each process with `Ctrl+C`.
+
+## Cleanup
+
+`npm run gae:clean` removes `apps/*/dist`, `vendor/portkey-gateway/build`, and any staged `app.yaml` so you can ship a clean source tree. Run it after deployment if you do not want compiled artifacts in your repository.
