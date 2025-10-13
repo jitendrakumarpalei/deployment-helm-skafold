@@ -4,7 +4,10 @@ const PORTKEY_PREFIX = 'x-portkey-';
 
 const METHODS_WITHOUT_BODY = new Set(['GET', 'HEAD']);
 
-export async function createForwardRequest(original: Request): Promise<Request> {
+export async function createForwardRequest(
+  original: Request,
+  overrideHeaders?: Headers
+): Promise<Request> {
   const clone = original.clone();
   const originalUrl = new URL(clone.url);
   const internalPath = originalUrl.pathname.startsWith(WRAPPER_PREFIX)
@@ -14,7 +17,7 @@ export async function createForwardRequest(original: Request): Promise<Request> 
   const internalUrl = new URL(clone.url);
   internalUrl.pathname = internalPath;
 
-  const headers = new Headers(clone.headers);
+  const headers = overrideHeaders ? new Headers(overrideHeaders) : new Headers(clone.headers);
   const method = clone.method.toUpperCase();
   const hasBody = !METHODS_WITHOUT_BODY.has(method);
 
