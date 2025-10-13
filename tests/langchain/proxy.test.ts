@@ -138,11 +138,32 @@ describe('LangChain → StringCost Gateway', () => {
 
       if (requestUrl.startsWith('http://test/llm')) {
         const requestIsRequest = typeof Request !== 'undefined' && input instanceof Request;
-        return gatewayApp.request(requestUrl, {
-          method: init.method ?? (requestIsRequest ? input.method : 'GET'),
-          headers: init.headers ?? (requestIsRequest ? input.headers : undefined),
-          body: init.body ?? (requestIsRequest ? await input.clone().text() : undefined),
+        const method = init.method ?? (requestIsRequest ? input.method : 'GET');
+        const headers = new Headers(
+          init.headers ?? (requestIsRequest ? input.headers : undefined) ?? {}
+        );
+        if (!headers.has('authorization')) {
+          headers.set('authorization', 'Bearer sk-stringcost-123');
+        }
+        if (!headers.has('x-stringcost-run-id')) {
+          headers.set('x-stringcost-run-id', runId);
+        }
+        if (!headers.has('x-stringcost-user-id')) {
+          headers.set('x-stringcost-user-id', 'user-langchain');
+        }
+
+        let body: BodyInit | undefined = init.body;
+        if (!body && requestIsRequest) {
+          body = await input.clone().text();
+        }
+
+        const gatewayRequest = new Request(requestUrl, {
+          method,
+          headers,
+          body,
         });
+
+        return gatewayApp.request(gatewayRequest);
       }
 
       if (requestUrl.startsWith(CONTROL_PLANE_BASE)) {
