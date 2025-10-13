@@ -5,6 +5,7 @@ export interface WorkerConfig {
   batchSize: number;
   classificationEndpoint: string;
   classificationApiKey?: string;
+  queueKey: string;
 }
 
 export function loadConfig(): WorkerConfig {
@@ -29,5 +30,6 @@ export function loadConfig(): WorkerConfig {
     batchSize: Number(process.env.WORKER_BATCH_SIZE ?? 10),
     classificationEndpoint,
     classificationApiKey: process.env.META_LLM_API_KEY,
+    queueKey: process.env.CLASSIFICATION_QUEUE_KEY ?? 'classification_jobs',
   };
 }

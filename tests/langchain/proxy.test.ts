@@ -8,7 +8,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { runMigrations as runLedgerMigrations } from '../../apps/ledger/src/migrate';
 import { runMigrations as runControlPlaneMigrations } from '../../apps/control-plane/src/migrate';
 import controlPlaneApp from '../../apps/control-plane/src/server';
-import { startWorker } from '../../apps/worker/src/worker';
+import { runWorkerOnce } from '../../apps/worker/src/worker';
 
 const CONTROL_PLANE_BASE = 'http://control.stringcost.local';
 
@@ -17,7 +17,6 @@ let redisContainer: RedisContainer | undefined;
 let pool: Pool;
 let redisUrl: string;
 let databaseUrl: string;
-let workerHandle: { stop: () => Promise<void> } | undefined;
 let gatewayApp: typeof import('../../apps/gateway/src/app').default;
 let eventCollectorApp: typeof import('../../apps/event-collector/src/server').default;
 let eventDbPool: typeof import('../../apps/event-collector/src/server').dbPool;
@@ -104,11 +103,9 @@ beforeAll(async () => {
   eventDbPool = eventModule.dbPool;
   eventRedis = eventModule.redisClient;
 
-  workerHandle = await startWorker();
 }, 180_000);
 
 afterAll(async () => {
-  await workerHandle?.stop();
   await pool.end();
   if (eventRedis) {
     await eventRedis.quit();
@@ -198,6 +195,8 @@ describe('LangChain → StringCost Gateway', () => {
             prompt_content: capturedPrompt,
           }),
         });
+
+        await runWorkerOnce();
 
         return new Response(
           JSON.stringify({

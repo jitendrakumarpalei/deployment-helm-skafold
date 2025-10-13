@@ -8,6 +8,10 @@
     "vendor/portkey-gateway"
   ],
   "scripts": {
+    "deploy:build": "npm run build",
+    "deploy:start": "npx pm2-runtime deploy/ecosystem.config.cjs",
+    "gae:start": "npm run build && npx pm2-runtime deploy/ecosystem.config.cjs",
+    "gae:deploy": "bash deploy/appengine/deploy.sh",
     "build": "npm -ws run build",
     "test": "npm -ws run test",
     "test:ledger": "npm run test --workspace @stringcost/ledger",

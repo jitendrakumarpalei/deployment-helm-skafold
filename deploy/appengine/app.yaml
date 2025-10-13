@@ -1,0 +1,23 @@
+runtime: nodejs
+env: flex
+entrypoint: npm run gae:start
+manual_scaling:
+  instances: 1
+network:
+  forwarded_ports:
+    - 8790
+    - 8791
+env_variables:
+  NODE_ENV: production
+  GATEWAY_PORT: "8080"
+  CONTROL_PLANE_PORT: "8790"
+  EVENT_COLLECTOR_PORT: "8791"
+  CONTROL_PLANE_URL: "http://127.0.0.1:8790"
+  ALBUS_BASEPATH: "http://127.0.0.1:8790"
+  DATABASE_URL: "YOUR_PRODUCTION_DATABASE_URL"
+  REDIS_URL: "YOUR_REDIS_URL"
+  META_LLM_CLASSIFIER_ENDPOINT: "https://classifier.yourdomain.com/api/classify"
+  META_LLM_API_KEY: "YOUR_CLASSIFIER_TOKEN"
+  CLASSIFICATION_QUEUE_KEY: "classification_jobs"
+  WORKER_POLL_INTERVAL_MS: "500"
+  WORKER_BATCH_SIZE: "5"

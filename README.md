@@ -210,6 +210,19 @@ Every request routed through the gateway produces a ledger entry (`ledger_events
 
 For additional configuration knobs (guardrails, conditional routing, streaming, Realtime) refer to Portkey’s configuration docs—the same payloads work here, only the header prefix changes to `x-stringcost-*`.
 
+## Render / PM2 Deployment
+
+`deploy/` contains assets for running every service on a single Render.com instance.
+
+- **Build command:** `npm run deploy:build`
+- **Start command:** `npm run deploy:start`
+
+`deploy/ecosystem.config.cjs` configures PM2 Runtime to launch the control plane, gateway, event collector, and worker together. See `deploy/README.md` for required environment variables and local dry-run tips.
+
+## Google App Engine Deployment
+
+`deploy/appengine/` contains a single-service `app.yaml` (App Engine Flexible) plus detailed instructions for running all processes under PM2 inside one instance. Copy `deploy/appengine/service-account.json.example` to `service-account.json` (or point `SERVICE_ACCOUNT_JSON` at your key). The deploy script reads the `project_id` from that file automatically, so you can simply run `npm run gae:deploy` (or pass `--project` to override). Review `deploy/appengine/README.md` for environment variables and deployment details.
+
 ## Local Development & Tests
 
 Install dependencies with `npm install --no-audit --no-fund`.

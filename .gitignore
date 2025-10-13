@@ -10,3 +10,4 @@ yarn-error.log*
 .vercel/
 .vscode/
 .swp
+deploy/appengine/service-account.json
