@@ -1,6 +1,6 @@
 runtime: nodejs22
 service: control-plane
-entrypoint: npm run gae:start:control-plane
+entrypoint: npm start
 automatic_scaling:
   max_instances: 2
   min_instances: 1

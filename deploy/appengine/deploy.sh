@@ -2,11 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/../.. && pwd)"
+STAGING_DIR="${ROOT_DIR}/deploy/appengine/staging"
 SERVICE_CONFIGS=(
-  "${ROOT_DIR}/deploy/appengine/services/gateway.yaml"
-  "${ROOT_DIR}/deploy/appengine/services/control-plane.yaml"
-  "${ROOT_DIR}/deploy/appengine/services/event-collector.yaml"
-  "${ROOT_DIR}/deploy/appengine/services/worker.yaml"
+  "${STAGING_DIR}/gateway/app.yaml"
+  "${STAGING_DIR}/control-plane/app.yaml"
+  "${STAGING_DIR}/event-collector/app.yaml"
+  "${STAGING_DIR}/worker/app.yaml"
 )
 DISPATCH_CONFIG="${ROOT_DIR}/deploy/appengine/dispatch.yaml"
 
@@ -33,6 +34,10 @@ echo "[GAE] Service configs generated."
 echo "[GAE] Building workspaces before deploy..."
 npm run build >/dev/null
 echo "[GAE] Build complete."
+
+echo "[GAE] Staging service directories..."
+node "${ROOT_DIR}/scripts/stage-appengine-services.mjs"
+echo "[GAE] Services staged."
 echo "[GAE] Deploying via gcloud app deploy..."
 
 deploy_args=("${SERVICE_CONFIGS[@]}")

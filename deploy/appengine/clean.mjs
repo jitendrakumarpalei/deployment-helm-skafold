@@ -17,6 +17,7 @@ const targets = [
 ].map((p) => join(ROOT, p));
 
 const serviceDir = join(ROOT, 'deploy/appengine/services');
+const stagingDir = join(ROOT, 'deploy/appengine/staging');
 
 async function cleanServiceOutputs() {
   let files = [];
@@ -30,6 +31,10 @@ async function cleanServiceOutputs() {
       .filter((file) => file.endsWith('.yaml') && !file.endsWith('.yaml.tpl'))
       .map((file) => safeRemove(join(serviceDir, file)))
   );
+}
+
+async function cleanStaging() {
+  await safeRemove(stagingDir);
 }
 
 async function safeRemove(path) {
@@ -47,4 +52,5 @@ async function safeRemove(path) {
     await safeRemove(target);
   }
   await cleanServiceOutputs();
+  await cleanStaging();
 })();

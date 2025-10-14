@@ -1,6 +1,6 @@
 runtime: nodejs22
 service: worker
-entrypoint: npm run gae:start:worker
+entrypoint: npm start
 basic_scaling:
   max_instances: 1
   idle_timeout: 10m

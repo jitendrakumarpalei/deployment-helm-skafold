@@ -12,3 +12,5 @@ yarn-error.log*
 .swp
 deploy/appengine/service-account.json
 deploy/appengine/.env
+deploy/appengine/staging/
+deploy/appengine/.env

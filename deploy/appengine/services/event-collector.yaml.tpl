@@ -1,6 +1,6 @@
 runtime: nodejs22
 service: event-collector
-entrypoint: npm run gae:start:event-collector
+entrypoint: npm start
 automatic_scaling:
   max_instances: 2
   min_instances: 1

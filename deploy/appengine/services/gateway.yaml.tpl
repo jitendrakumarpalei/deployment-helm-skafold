@@ -1,6 +1,6 @@
 runtime: nodejs22
 service: default
-entrypoint: npm run gae:start:gateway
+entrypoint: npm start
 automatic_scaling:
   max_instances: 3
   min_instances: 1
