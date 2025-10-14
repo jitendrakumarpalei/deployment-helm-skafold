@@ -11,6 +11,8 @@ const app = new Hono();
 export const dbPool = createPool();
 const ledgerRepo = new LedgerRepository(dbPool);
 
+app.get('/healthz', (c) => c.json({ status: 'ok' }));
+
 app.post('/events', async (c) => {
   const payload = await c.req.json<EventPayload>();
 
