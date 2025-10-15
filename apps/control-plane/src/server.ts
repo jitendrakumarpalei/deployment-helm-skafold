@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
 import { getPool, withClient } from './db.js';
 
-const app = new Hono();
+const controlApp = new Hono();
 
-app.get('/healthz', (c) => c.json({ status: 'ok' }));
+controlApp.get('/healthz', (c) => c.json({ status: 'ok' }));
 
 function extractApiKey(c: any): string | null {
   const auth = c.req.header('authorization') || '';
@@ -28,7 +28,7 @@ interface ProviderCredentialRow {
   metadata: unknown;
 }
 
-app.get('/v2/models', async (c) => {
+controlApp.get('/v2/models', async (c) => {
   const apiKey = extractApiKey(c);
   if (!apiKey) {
     return c.json({ message: 'Missing API key' }, 401);
@@ -66,7 +66,7 @@ app.get('/v2/models', async (c) => {
   return c.json({ data });
 });
 
-app.get('/v1/account/config', async (c) => {
+controlApp.get('/v1/account/config', async (c) => {
   const apiKey = extractApiKey(c);
   if (!apiKey) {
     return c.json({ message: 'Missing API key' }, 401);
@@ -109,5 +109,18 @@ app.get('/v1/account/config', async (c) => {
 
   return c.json({ provider: cred.provider, config });
 });
+
+function forwardToControl(c: import('hono').Context) {
+  const url = new URL(c.req.url);
+  const stripped = url.pathname.replace(/^\/control/, '') || '/';
+  url.pathname = stripped.startsWith('/') ? stripped : `/${stripped}`;
+  const forwarded = new Request(url.toString(), c.req.raw);
+  return controlApp.fetch(forwarded);
+}
+
+const app = new Hono();
+app.route('/', controlApp);
+app.all('/control', (c) => forwardToControl(c));
+app.all('/control/*', (c) => forwardToControl(c));
 
 export default app;

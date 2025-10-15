@@ -1,0 +1,819 @@
+
+> stringcost@0.0.1 gae:deploy
+> bash deploy/appengine/deploy.sh
+
+[GAE] Activating service account from /home/sss/Code/stringcost/deploy/appengine/service-account.json...
+Activated service account credentials for: [stringcost-wsl@stringcost.iam.gserviceaccount.com]
+[GAE] Rendering service configs using /home/sss/Code/stringcost/deploy/appengine/.env...
+[render] wrote /home/sss/Code/stringcost/deploy/appengine/services/control-plane.yaml
+[render] wrote /home/sss/Code/stringcost/deploy/appengine/services/event-collector.yaml
+[render] wrote /home/sss/Code/stringcost/deploy/appengine/services/gateway.yaml
+[render] wrote /home/sss/Code/stringcost/deploy/appengine/services/worker.yaml
+[GAE] Service configs generated.
+[GAE] Building workspaces before deploy...
+npm warn -ws is not a valid single-hyphen cli flag and will be removed in the future
+[36m
+[1msrc/start-server.ts[22m → [1mbuild[22m...[39m
+[1m[33m(!) Unresolved dependencies[39m[22m
+[90mhttps://rollupjs.org/troubleshooting/#warning-treating-module-as-external-dependency[39m
+[1m@hono/node-server[22m (imported by "src/start-server.ts")
+[1mhono/streaming[22m (imported by "src/start-server.ts")
+[1m@hono/node-ws[22m (imported by "src/start-server.ts")
+[1mpath[22m (imported by "src/start-server.ts")
+[1murl[22m (imported by "src/start-server.ts")
+[1mfs[22m (imported by "src/start-server.ts")
+[1mhono[22m (imported by "src/index.ts")
+[1mhono/pretty-json[22m (imported by "src/index.ts")
+[1mhono/http-exception[22m (imported by "src/index.ts")
+[1mhono/compress[22m (imported by "src/index.ts")
+[1mhono/adapter[22m (imported by "src/index.ts", "src/middlewares/log/index.ts", "src/handlers/modelsHandler.ts", "src/handlers/handlerUtils.ts", "src/handlers/responseHandlers.ts", "src/handlers/services/cacheService.ts", "src/handlers/services/responseService.ts", "src/providers/google-vertex-ai/utils.ts", "src/providers/sagemaker/api.ts", "plugins/portkey/globals.ts" and "src/providers/bedrock/utils.ts")
+[1mws[22m (imported by "src/handlers/realtimeHandlerNode.ts")
+[1mzod[22m (imported by "src/middlewares/requestValidator/schema/config.ts", "src/handlers/services/logsService.ts" and "src/providers/bedrock/uploadFileUtils.ts")
+[1masync-retry[22m (imported by "src/handlers/retryHandler.ts")
+[1m@cfworker/json-schema[22m (imported by "plugins/default/jsonSchema.ts")
+[1mhttps[22m (imported by "plugins/azure/pii.ts" and "plugins/azure/contentSafety.ts")
+[1mjose[22m (imported by "plugins/default/jwt.ts")
+[1m@aws-crypto/sha256-js[22m (imported by "plugins/bedrock/util.ts" and "src/providers/bedrock/utils.ts")
+[1m@smithy/signature-v4[22m (imported by "plugins/bedrock/util.ts" and "src/providers/bedrock/utils.ts")
+[1m[33m(!) Circular dependencies[39m[22m
+src/providers/index.ts -> src/providers/bedrock/index.ts -> src/providers/bedrock/uploadFile.ts -> src/services/transformToProviderRequest.ts -> src/providers/index.ts
+src/providers/google/chatComplete.ts -> src/providers/google-vertex-ai/chatComplete.ts -> src/providers/google/chatComplete.ts
+src/handlers/handlerUtils.ts -> src/handlers/responseHandlers.ts -> src/providers/index.ts -> src/providers/fireworks-ai/index.ts -> src/providers/fireworks-ai/createFinetune.ts -> src/handlers/handlerUtils.ts
+[32mcreated [1mbuild[22m in [1m5.5s[22m[39m
+[GAE] Build complete.
+[GAE] Staging service directories...
+[stage] staged services in /home/sss/Code/stringcost/deploy/appengine/staging
+[GAE] Services staged.
+[GAE] Deploying via gcloud app deploy...
+[GAE] Using project stringcost from service account JSON.
+DEBUG: Running [gcloud.app.deploy] with arguments: [--project: "stringcost", --promote: "true", --stop-previous-version: "true", --verbosity: "debug", DEPLOYABLES:5: "['/home/sss/Code/stringcost/deploy/appengine/staging/gateway/app.yaml', '/home/sss/Code/stringcost/deploy/appengine/staging/control-plane/app.yaml', '/home/sss/Code/stringcost/deploy/appengine/staging/event-collector/app.yaml', '/home/sss/Code/stringcost/deploy/appengine/staging/worker/app.yaml', '/home/sss/Code/stringcost/deploy/appengine/dispatch.yaml']"]
+DEBUG: Loading runtimes experiment config from [gs://runtime-builders/experiments.yaml]
+INFO: Reading [<googlecloudsdk.api_lib.storage.storage_util.ObjectReference object at 0x7f7421049130>]
+DEBUG: Flex image build option: FlexImageBuildOptions.ON_SERVER
+DEBUG: API endpoint: [https://appengine.googleapis.com/], API version: [v1]
+Services to deploy:
+
+descriptor:                  [/home/sss/Code/stringcost/deploy/appengine/staging/gateway/app.yaml]
+source:                      [/home/sss/Code/stringcost/deploy/appengine/staging/gateway]
+target project:              [stringcost]
+target service:              [default]
+target version:              [20251015t102637]
+target url:                  [https://stringcost.uc.r.appspot.com]
+target service account:      [stringcost-wsl@stringcost.iam.gserviceaccount.com]
+
+
+descriptor:                  [/home/sss/Code/stringcost/deploy/appengine/staging/control-plane/app.yaml]
+source:                      [/home/sss/Code/stringcost/deploy/appengine/staging/control-plane]
+target project:              [stringcost]
+target service:              [control-plane]
+target version:              [20251015t102637]
+target url:                  [https://control-plane-dot-stringcost.uc.r.appspot.com]
+target service account:      [stringcost-wsl@stringcost.iam.gserviceaccount.com]
+
+
+descriptor:                  [/home/sss/Code/stringcost/deploy/appengine/staging/event-collector/app.yaml]
+source:                      [/home/sss/Code/stringcost/deploy/appengine/staging/event-collector]
+target project:              [stringcost]
+target service:              [event-collector]
+target version:              [20251015t102637]
+target url:                  [https://event-collector-dot-stringcost.uc.r.appspot.com]
+target service account:      [stringcost-wsl@stringcost.iam.gserviceaccount.com]
+
+
+descriptor:                  [/home/sss/Code/stringcost/deploy/appengine/staging/worker/app.yaml]
+source:                      [/home/sss/Code/stringcost/deploy/appengine/staging/worker]
+target project:              [stringcost]
+target service:              [worker]
+target version:              [20251015t102637]
+target url:                  [https://worker-dot-stringcost.uc.r.appspot.com]
+target service account:      [stringcost-wsl@stringcost.iam.gserviceaccount.com]
+
+
+Configurations to update:
+
+descriptor:      [/home/sss/Code/stringcost/deploy/appengine/dispatch.yaml]
+type:            [routing rules]
+target project:  [stringcost]
+
+
+Do you want to continue (Y/n)?  
+DEBUG: No bucket specified, retrieving default bucket.
+DEBUG: Using bucket [gs://staging.stringcost.appspot.com].
+Beginning deployment of service [default]...
+INFO: Using default gcloudignore file:
+--------------------------------------------------
+# This file specifies files that are *not* uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore, with the addition of
+# "#!include" directives (which insert the entries of the given .gitignore-style
+# file at that point).
+#
+# For more information, run:
+#   $ gcloud topic gcloudignore
+#
+.gcloudignore
+# If you would like to upload your .git directory, .gitignore file or files
+# from your .gitignore file, remove the corresponding line
+# below:
+.git
+.gitignore
+
+# Node.js dependencies:
+node_modules/
+--------------------------------------------------
+Created .gcloudignore file. See `gcloud topic gcloudignore` for details.
+DEBUG: Skipping file [.gcloudignore]
+DEBUG: Skipping upload of [package.json]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [app.yaml]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [dist/server.js]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [source-context.json]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Uploading 0 files to Google Cloud Storage
+DEBUG: Using [16] threads
+╔════════════════════════════════════════════════════════════╗
+╠═ Uploading 0 files to Google Cloud Storage                ═╣
+╚════════════════════════════════════════════════════════════╝
+File upload done.
+INFO: Manifest: [{'package.json': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/2c0c57a76f9c2ea1bdbf62e1142a9a2d11bdebbe', 'sha1Sum': '2c0c57a76f9c2ea1bdbf62e1142a9a2d11bdebbe'}, 'app.yaml': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/6a3013ccdd107d7ac3647be2be6a57ab27b50fed', 'sha1Sum': '6a3013ccdd107d7ac3647be2be6a57ab27b50fed'}, 'dist/server.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/f514a3e47240391ad4980764937d9479913a8c4a', 'sha1Sum': 'f514a3e47240391ad4980764937d9479913a8c4a'}, 'source-context.json': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/58b4c86d41018761180de038fd12207ea617b55d', 'sha1Sum': '58b4c86d41018761180de038fd12207ea617b55d'}}]
+DEBUG: Converted YAML to JSON: "{
+  "automaticScaling": {
+    "standardSchedulerSettings": {
+      "maxInstances": 3,
+      "minInstances": 1
+    }
+  },
+  "betaSettings": {
+    "cloud_sql_instances": "stringcost:us-central1:stringcost-db"
+  },
+  "entrypoint": {
+    "shell": "npm start"
+  },
+  "envVariables": {
+    "DATABASE_URL": "postgresql://postgres:n5mp&/-`lu@93}Y{@172.16.128.3:5432/postgres?host=/cloudsql/stringcost:us-central1:stringcost-db",
+    "META_LLM_API_KEY": "Idfdfd",
+    "META_LLM_CLASSIFIER_ENDPOINT": "https://classifier.yourdomain.com/api/classify",
+    "NODE_ENV": "production"
+  },
+  "handlers": [
+    {
+      "script": {
+        "scriptPath": "auto"
+      },
+      "securityLevel": "SECURE_ALWAYS",
+      "urlRegex": "/.*"
+    }
+  ],
+  "runtime": "nodejs22"
+}"
+DEBUG: Operation [apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050] not complete. Waiting to retry.
+Updating service [default]...
+........DEBUG: Operation [apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050] not complete. Waiting to retry.
+.............................DEBUG: Operation [apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050] not complete. Waiting to retry.
+...............................DEBUG: Operation [apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050] not complete. Waiting to retry.
+..............................DEBUG: Operation [apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050] not complete. Waiting to retry.
+................................DEBUG: Operation [apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050] not complete. Waiting to retry.
+..................................DEBUG: Operation [apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050] not complete. Waiting to retry.
+.............................WARNING: *** Improve build performance by generating and committing package-lock.json.
+
+DEBUG: Operation [apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050] not complete. Waiting to retry.
+................................DEBUG: Operation [apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050] not complete. Waiting to retry.
+...............................DEBUG: Operation [apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050] complete. Result: {
+    "done": true,
+    "metadata": {
+        "@type": "type.googleapis.com/google.appengine.v1.OperationMetadataV1",
+        "endTime": "2025-10-15T05:43:33.287Z",
+        "insertTime": "2025-10-15T05:42:49.657Z",
+        "method": "google.appengine.v1.Versions.CreateVersion",
+        "target": "apps/stringcost/services/default/versions/20251015t102637",
+        "user": "stringcost-wsl@stringcost.iam.gserviceaccount.com",
+        "warning": [
+            "*** Improve build performance by generating and committing package-lock.json."
+        ]
+    },
+    "name": "apps/stringcost/operations/2a2824c3-708d-477f-adda-dd4398bab050",
+    "response": {
+        "@type": "type.googleapis.com/google.appengine.v1.Version",
+        "automaticScaling": {
+            "standardSchedulerSettings": {
+                "maxInstances": 3,
+                "minInstances": 1
+            }
+        },
+        "createTime": "2025-10-15T05:43:27Z",
+        "diskUsageBytes": "5625738",
+        "env": "standard",
+        "id": "20251015t102637",
+        "instanceClass": "F1",
+        "name": "apps/stringcost/services/default/versions/20251015t102637",
+        "network": {},
+        "runtime": "nodejs22",
+        "runtimeChannel": "default",
+        "servingStatus": "SERVING",
+        "threadsafe": true,
+        "versionUrl": "https://20251015t102637-dot-stringcost.appspot.com"
+    }
+}
+done.
+DEBUG: Operation [apps/stringcost/operations/6b43bac7-68b3-4382-973b-87afe844f5bd] not complete. Waiting to retry.
+Setting traffic split for service [default]...
+.......DEBUG: Operation [apps/stringcost/operations/6b43bac7-68b3-4382-973b-87afe844f5bd] not complete. Waiting to retry.
+...............................DEBUG: Operation [apps/stringcost/operations/6b43bac7-68b3-4382-973b-87afe844f5bd] complete. Result: {
+    "done": true,
+    "metadata": {
+        "@type": "type.googleapis.com/google.appengine.v1.OperationMetadataV1",
+        "endTime": "2025-10-15T05:43:46.311Z",
+        "insertTime": "2025-10-15T05:43:40.593Z",
+        "method": "google.appengine.v1.Services.UpdateService",
+        "target": "apps/stringcost/services/default",
+        "user": "stringcost-wsl@stringcost.iam.gserviceaccount.com"
+    },
+    "name": "apps/stringcost/operations/6b43bac7-68b3-4382-973b-87afe844f5bd",
+    "response": {
+        "@type": "type.googleapis.com/google.appengine.v1.Service",
+        "id": "default",
+        "name": "apps/stringcost/services/default",
+        "split": {
+            "allocations": {
+                "20251015t102637": 1
+            }
+        }
+    }
+}
+done.
+INFO: Previous default version [stringcost/default/20251015t095311] is an automatically scaled standard environment app, so not stopping it.
+Deployed service [default] to [https://stringcost.uc.r.appspot.com]
+Beginning deployment of service [control-plane]...
+INFO: Using default gcloudignore file:
+--------------------------------------------------
+# This file specifies files that are *not* uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore, with the addition of
+# "#!include" directives (which insert the entries of the given .gitignore-style
+# file at that point).
+#
+# For more information, run:
+#   $ gcloud topic gcloudignore
+#
+.gcloudignore
+# If you would like to upload your .git directory, .gitignore file or files
+# from your .gitignore file, remove the corresponding line
+# below:
+.git
+.gitignore
+
+# Node.js dependencies:
+node_modules/
+--------------------------------------------------
+Created .gcloudignore file. See `gcloud topic gcloudignore` for details.
+DEBUG: Skipping file [.gcloudignore]
+DEBUG: Skipping upload of [package.json]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [app.yaml]
+INFO: Incremental upload skipped 100.0% of data
+INFO: Incremental upload skipped 17.6% of data
+DEBUG: Skipping upload of [dist/index.js]
+INFO: Incremental upload skipped 28.13% of data
+DEBUG: Skipping upload of [dist/db.js]
+INFO: Incremental upload skipped 36.15% of data
+DEBUG: Skipping upload of [dist/migrate.js]
+INFO: Incremental upload skipped 47.34% of data
+DEBUG: Skipping upload of [source-context.json]
+INFO: Incremental upload skipped 48.33% of data
+DEBUG: Uploading 1 file to Google Cloud Storage
+DEBUG: Using [16] threads
+╔════════════════════════════════════════════════════════════╗
+╠═ Uploading 1 file to Google Cloud Storage                 ═╣
+╚INFO: Uploading [/home/sss/Code/stringcost/deploy/appengine/staging/control-plane/dist/server.js] to [staging.stringcost.appspot.com/cbf0fde8ee5a40486bb911c69ea9c9caf15c79ef]
+════════════════════════════════════════════════════════════╝
+File upload done.
+INFO: Manifest: [{'package.json': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/e65baf0e92a192c123a54774b2d5b388b54748f7', 'sha1Sum': 'e65baf0e92a192c123a54774b2d5b388b54748f7'}, 'app.yaml': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/c4a36c067c8b48a0285a04677b83519f7d093cdc', 'sha1Sum': 'c4a36c067c8b48a0285a04677b83519f7d093cdc'}, 'dist/server.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/cbf0fde8ee5a40486bb911c69ea9c9caf15c79ef', 'sha1Sum': 'cbf0fde8ee5a40486bb911c69ea9c9caf15c79ef'}, 'dist/index.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/86acac61a13e3876b06231f0985ebc9226b4a4bc', 'sha1Sum': '86acac61a13e3876b06231f0985ebc9226b4a4bc'}, 'dist/db.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/713342839150392486ce623c7925c45a7e993afa', 'sha1Sum': '713342839150392486ce623c7925c45a7e993afa'}, 'dist/migrate.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/e39568a1794ba8eff86fbf4f3f9cecb315748057', 'sha1Sum': 'e39568a1794ba8eff86fbf4f3f9cecb315748057'}, 'source-context.json': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/58b4c86d41018761180de038fd12207ea617b55d', 'sha1Sum': '58b4c86d41018761180de038fd12207ea617b55d'}}]
+DEBUG: Converted YAML to JSON: "{
+  "automaticScaling": {
+    "standardSchedulerSettings": {
+      "maxInstances": 2,
+      "minInstances": 1
+    }
+  },
+  "betaSettings": {
+    "cloud_sql_instances": "stringcost:us-central1:stringcost-db"
+  },
+  "entrypoint": {
+    "shell": "npm start"
+  },
+  "envVariables": {
+    "DATABASE_URL": "postgresql://postgres:n5mp&/-`lu@93}Y{@172.16.128.3:5432/postgres?host=/cloudsql/stringcost:us-central1:stringcost-db",
+    "NODE_ENV": "production"
+  },
+  "handlers": [
+    {
+      "script": {
+        "scriptPath": "auto"
+      },
+      "securityLevel": "SECURE_ALWAYS",
+      "urlRegex": "/.*"
+    }
+  ],
+  "runtime": "nodejs22"
+}"
+DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] not complete. Waiting to retry.
+Updating service [control-plane]...
+.......DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] not complete. Waiting to retry.
+.................................DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] not complete. Waiting to retry.
+...............................DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] not complete. Waiting to retry.
+................................DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] not complete. Waiting to retry.
+................................DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] not complete. Waiting to retry.
+.............................DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] not complete. Waiting to retry.
+..............................DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] not complete. Waiting to retry.
+...............................WARNING: *** Improve build performance by generating and committing package-lock.json.
+
+DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] not complete. Waiting to retry.
+..............................DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] not complete. Waiting to retry.
+.................................DEBUG: Operation [apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b] complete. Result: {
+    "done": true,
+    "metadata": {
+        "@type": "type.googleapis.com/google.appengine.v1.OperationMetadataV1",
+        "endTime": "2025-10-15T05:44:44.363Z",
+        "insertTime": "2025-10-15T05:43:53.389Z",
+        "method": "google.appengine.v1.Versions.CreateVersion",
+        "target": "apps/stringcost/services/control-plane/versions/20251015t102637",
+        "user": "stringcost-wsl@stringcost.iam.gserviceaccount.com",
+        "warning": [
+            "*** Improve build performance by generating and committing package-lock.json."
+        ]
+    },
+    "name": "apps/stringcost/operations/cede093b-66d9-4c0a-9bad-6db8726cbc4b",
+    "response": {
+        "@type": "type.googleapis.com/google.appengine.v1.Version",
+        "automaticScaling": {
+            "standardSchedulerSettings": {
+                "maxInstances": 2,
+                "minInstances": 1
+            }
+        },
+        "createTime": "2025-10-15T05:44:36Z",
+        "diskUsageBytes": "4592867",
+        "env": "standard",
+        "id": "20251015t102637",
+        "instanceClass": "F1",
+        "name": "apps/stringcost/services/control-plane/versions/20251015t102637",
+        "network": {},
+        "runtime": "nodejs22",
+        "runtimeChannel": "default",
+        "servingStatus": "SERVING",
+        "threadsafe": true,
+        "versionUrl": "https://20251015t102637-dot-control-plane-dot-stringcost.appspot.com"
+    }
+}
+done.
+DEBUG: Operation [apps/stringcost/operations/bf4afb85-4297-4cd0-ade8-edef45922229] not complete. Waiting to retry.
+Setting traffic split for service [control-plane]...
+........DEBUG: Operation [apps/stringcost/operations/bf4afb85-4297-4cd0-ade8-edef45922229] not complete. Waiting to retry.
+................................DEBUG: Operation [apps/stringcost/operations/bf4afb85-4297-4cd0-ade8-edef45922229] complete. Result: {
+    "done": true,
+    "metadata": {
+        "@type": "type.googleapis.com/google.appengine.v1.OperationMetadataV1",
+        "endTime": "2025-10-15T05:44:55.380Z",
+        "insertTime": "2025-10-15T05:44:49.965Z",
+        "method": "google.appengine.v1.Services.UpdateService",
+        "target": "apps/stringcost/services/control-plane",
+        "user": "stringcost-wsl@stringcost.iam.gserviceaccount.com"
+    },
+    "name": "apps/stringcost/operations/bf4afb85-4297-4cd0-ade8-edef45922229",
+    "response": {
+        "@type": "type.googleapis.com/google.appengine.v1.Service",
+        "id": "control-plane",
+        "name": "apps/stringcost/services/control-plane",
+        "split": {
+            "allocations": {
+                "20251015t102637": 1
+            }
+        }
+    }
+}
+done.
+INFO: Previous default version [stringcost/control-plane/20251015t095311] is an automatically scaled standard environment app, so not stopping it.
+Deployed service [control-plane] to [https://control-plane-dot-stringcost.uc.r.appspot.com]
+Beginning deployment of service [event-collector]...
+INFO: Using default gcloudignore file:
+--------------------------------------------------
+# This file specifies files that are *not* uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore, with the addition of
+# "#!include" directives (which insert the entries of the given .gitignore-style
+# file at that point).
+#
+# For more information, run:
+#   $ gcloud topic gcloudignore
+#
+.gcloudignore
+# If you would like to upload your .git directory, .gitignore file or files
+# from your .gitignore file, remove the corresponding line
+# below:
+.git
+.gitignore
+
+# Node.js dependencies:
+node_modules/
+--------------------------------------------------
+Created .gcloudignore file. See `gcloud topic gcloudignore` for details.
+DEBUG: Skipping file [.gcloudignore]
+DEBUG: Skipping upload of [package.json]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [app.yaml]
+INFO: Incremental upload skipped 100.0% of data
+INFO: Incremental upload skipped 35.37% of data
+DEBUG: Skipping upload of [dist/index.js]
+INFO: Incremental upload skipped 51.93% of data
+DEBUG: Skipping upload of [dist/db.js]
+INFO: Incremental upload skipped 72.56% of data
+DEBUG: Skipping upload of [source-context.json]
+INFO: Incremental upload skipped 73.25% of data
+DEBUG: Uploading 1 file to Google Cloud Storage
+DEBUG: Using [16] threads
+╔════════════════════════════════════════════════════════════╗
+╠═ Uploading 1 file to Google Cloud Storage                 ═╣
+╚INFO: Uploading [/home/sss/Code/stringcost/deploy/appengine/staging/event-collector/dist/server.js] to [staging.stringcost.appspot.com/dd74651b2daf0701f3e80d99d7fee7769c7c62ec]
+════════════════════════════════════════════════════════════╝
+File upload done.
+INFO: Manifest: [{'package.json': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/137fccd6abb5ac002ee566dba36ff995c2d251e3', 'sha1Sum': '137fccd6abb5ac002ee566dba36ff995c2d251e3'}, 'app.yaml': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/ae77acb079e33ffeb228e566a7b14ecfb2bcd65d', 'sha1Sum': 'ae77acb079e33ffeb228e566a7b14ecfb2bcd65d'}, 'dist/server.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/dd74651b2daf0701f3e80d99d7fee7769c7c62ec', 'sha1Sum': 'dd74651b2daf0701f3e80d99d7fee7769c7c62ec'}, 'dist/index.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/d20245d5169b7f3ba7f541f6dfd97729ebd96a1b', 'sha1Sum': 'd20245d5169b7f3ba7f541f6dfd97729ebd96a1b'}, 'dist/db.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/a01c3ea24a514f120814452d36a384105b79e4a2', 'sha1Sum': 'a01c3ea24a514f120814452d36a384105b79e4a2'}, 'source-context.json': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/58b4c86d41018761180de038fd12207ea617b55d', 'sha1Sum': '58b4c86d41018761180de038fd12207ea617b55d'}}]
+DEBUG: Converted YAML to JSON: "{
+  "automaticScaling": {
+    "standardSchedulerSettings": {
+      "maxInstances": 2,
+      "minInstances": 1
+    }
+  },
+  "betaSettings": {
+    "cloud_sql_instances": "stringcost:us-central1:stringcost-db"
+  },
+  "entrypoint": {
+    "shell": "npm start"
+  },
+  "envVariables": {
+    "DATABASE_URL": "postgresql://postgres:n5mp&/-`lu@93}Y{@172.16.128.3:5432/postgres?host=/cloudsql/stringcost:us-central1:stringcost-db",
+    "NODE_ENV": "production"
+  },
+  "handlers": [
+    {
+      "script": {
+        "scriptPath": "auto"
+      },
+      "securityLevel": "SECURE_ALWAYS",
+      "urlRegex": "/.*"
+    }
+  ],
+  "runtime": "nodejs22"
+}"
+DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] not complete. Waiting to retry.
+Updating service [event-collector]...
+.......DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] not complete. Waiting to retry.
+..............................DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] not complete. Waiting to retry.
+................................DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] not complete. Waiting to retry.
+...............................DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] not complete. Waiting to retry.
+.............................DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] not complete. Waiting to retry.
+............................DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] not complete. Waiting to retry.
+..............................DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] not complete. Waiting to retry.
+...............................DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] not complete. Waiting to retry.
+...............................WARNING: *** Improve build performance by generating and committing package-lock.json.
+
+DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] not complete. Waiting to retry.
+..................................DEBUG: Operation [apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13] complete. Result: {
+    "done": true,
+    "metadata": {
+        "@type": "type.googleapis.com/google.appengine.v1.OperationMetadataV1",
+        "endTime": "2025-10-15T05:45:56.470Z",
+        "insertTime": "2025-10-15T05:45:03.544Z",
+        "method": "google.appengine.v1.Versions.CreateVersion",
+        "target": "apps/stringcost/services/event-collector/versions/20251015t102637",
+        "user": "stringcost-wsl@stringcost.iam.gserviceaccount.com",
+        "warning": [
+            "*** Improve build performance by generating and committing package-lock.json."
+        ]
+    },
+    "name": "apps/stringcost/operations/588835a1-0ee5-4fce-8a60-19d1956c4f13",
+    "response": {
+        "@type": "type.googleapis.com/google.appengine.v1.Version",
+        "automaticScaling": {
+            "standardSchedulerSettings": {
+                "maxInstances": 2,
+                "minInstances": 1
+            }
+        },
+        "createTime": "2025-10-15T05:45:48Z",
+        "diskUsageBytes": "4591372",
+        "env": "standard",
+        "id": "20251015t102637",
+        "instanceClass": "F1",
+        "name": "apps/stringcost/services/event-collector/versions/20251015t102637",
+        "network": {},
+        "runtime": "nodejs22",
+        "runtimeChannel": "default",
+        "servingStatus": "SERVING",
+        "threadsafe": true,
+        "versionUrl": "https://20251015t102637-dot-event-collector-dot-stringcost.appspot.com"
+    }
+}
+done.
+DEBUG: Operation [apps/stringcost/operations/df65c53f-9944-446a-9cfc-4d64c389645c] not complete. Waiting to retry.
+Setting traffic split for service [event-collector]...
+.......DEBUG: Operation [apps/stringcost/operations/df65c53f-9944-446a-9cfc-4d64c389645c] not complete. Waiting to retry.
+...............................DEBUG: Operation [apps/stringcost/operations/df65c53f-9944-446a-9cfc-4d64c389645c] complete. Result: {
+    "done": true,
+    "metadata": {
+        "@type": "type.googleapis.com/google.appengine.v1.OperationMetadataV1",
+        "endTime": "2025-10-15T05:46:04.494Z",
+        "insertTime": "2025-10-15T05:45:58.832Z",
+        "method": "google.appengine.v1.Services.UpdateService",
+        "target": "apps/stringcost/services/event-collector",
+        "user": "stringcost-wsl@stringcost.iam.gserviceaccount.com"
+    },
+    "name": "apps/stringcost/operations/df65c53f-9944-446a-9cfc-4d64c389645c",
+    "response": {
+        "@type": "type.googleapis.com/google.appengine.v1.Service",
+        "id": "event-collector",
+        "name": "apps/stringcost/services/event-collector",
+        "split": {
+            "allocations": {
+                "20251015t102637": 1
+            }
+        }
+    }
+}
+done.
+INFO: Previous default version [stringcost/event-collector/20251015t095311] is an automatically scaled standard environment app, so not stopping it.
+Deployed service [event-collector] to [https://event-collector-dot-stringcost.uc.r.appspot.com]
+Beginning deployment of service [worker]...
+INFO: Using default gcloudignore file:
+--------------------------------------------------
+# This file specifies files that are *not* uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore, with the addition of
+# "#!include" directives (which insert the entries of the given .gitignore-style
+# file at that point).
+#
+# For more information, run:
+#   $ gcloud topic gcloudignore
+#
+.gcloudignore
+# If you would like to upload your .git directory, .gitignore file or files
+# from your .gitignore file, remove the corresponding line
+# below:
+.git
+.gitignore
+
+# Node.js dependencies:
+node_modules/
+--------------------------------------------------
+Created .gcloudignore file. See `gcloud topic gcloudignore` for details.
+DEBUG: Skipping file [.gcloudignore]
+DEBUG: Skipping upload of [package.json]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [app.yaml]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [dist/queue.js]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [dist/server.js]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [dist/worker.js]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [dist/config.js]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [dist/classifier.js]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Skipping upload of [source-context.json]
+INFO: Incremental upload skipped 100.0% of data
+DEBUG: Uploading 0 files to Google Cloud Storage
+DEBUG: Using [16] threads
+╔════════════════════════════════════════════════════════════╗
+╠═ Uploading 0 files to Google Cloud Storage                ═╣
+╚════════════════════════════════════════════════════════════╝
+File upload done.
+INFO: Manifest: [{'package.json': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/68e8f7b48032f72bee02a5f3e6f10588400fb1a4', 'sha1Sum': '68e8f7b48032f72bee02a5f3e6f10588400fb1a4'}, 'app.yaml': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/8a284e41e42852f27b93ae4a8e7702a111aae33a', 'sha1Sum': '8a284e41e42852f27b93ae4a8e7702a111aae33a'}, 'dist/queue.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/875fef14b4cbd56ec381cf4d8f648ff4f7ae1d8d', 'sha1Sum': '875fef14b4cbd56ec381cf4d8f648ff4f7ae1d8d'}, 'dist/server.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/0b31a3bf52e98ce63a5fddd42aec5206a21df4e8', 'sha1Sum': '0b31a3bf52e98ce63a5fddd42aec5206a21df4e8'}, 'dist/worker.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/a60518d3f0a70892f4b204f1922ca1ddb61021d7', 'sha1Sum': 'a60518d3f0a70892f4b204f1922ca1ddb61021d7'}, 'dist/config.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/d5fcb3b5148675b32bb7ab1b90c767d8553046f4', 'sha1Sum': 'd5fcb3b5148675b32bb7ab1b90c767d8553046f4'}, 'dist/classifier.js': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/99cf29d7c99973d152bc9cef163670accc041d67', 'sha1Sum': '99cf29d7c99973d152bc9cef163670accc041d67'}, 'source-context.json': {'sourceUrl': 'https://storage.googleapis.com/staging.stringcost.appspot.com/58b4c86d41018761180de038fd12207ea617b55d', 'sha1Sum': '58b4c86d41018761180de038fd12207ea617b55d'}}]
+DEBUG: Converted YAML to JSON: "{
+  "basicScaling": {
+    "idleTimeout": "600s",
+    "maxInstances": 1
+  },
+  "betaSettings": {
+    "cloud_sql_instances": "stringcost:us-central1:stringcost-db"
+  },
+  "entrypoint": {
+    "shell": "npm start"
+  },
+  "envVariables": {
+    "DATABASE_URL": "postgresql://postgres:n5mp&/-`lu@93}Y{@172.16.128.3:5432/postgres?host=/cloudsql/stringcost:us-central1:stringcost-db",
+    "META_LLM_API_KEY": "Idfdfd",
+    "META_LLM_CLASSIFIER_ENDPOINT": "https://classifier.yourdomain.com/api/classify",
+    "NODE_ENV": "production",
+    "WORKER_BATCH_SIZE": "5",
+    "WORKER_POLL_INTERVAL_MS": "500",
+    "WORKER_RESERVATION_TIMEOUT_MS": "300000",
+    "WORKER_RETENTION_MS": "86400000"
+  },
+  "handlers": [
+    {
+      "script": {
+        "scriptPath": "auto"
+      },
+      "securityLevel": "SECURE_ALWAYS",
+      "urlRegex": "/.*"
+    }
+  ],
+  "runtime": "nodejs22"
+}"
+DEBUG: Operation [apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c] not complete. Waiting to retry.
+Updating service [worker]...
+........DEBUG: Operation [apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c] not complete. Waiting to retry.
+...............................DEBUG: Operation [apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c] not complete. Waiting to retry.
+...............................DEBUG: Operation [apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c] not complete. Waiting to retry.
+.................................DEBUG: Operation [apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c] not complete. Waiting to retry.
+................................DEBUG: Operation [apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c] not complete. Waiting to retry.
+............................DEBUG: Operation [apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c] not complete. Waiting to retry.
+................................DEBUG: Operation [apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c] not complete. Waiting to retry.
+..............................WARNING: *** Improve build performance by generating and committing package-lock.json.
+
+DEBUG: Operation [apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c] not complete. Waiting to retry.
+...............................DEBUG: Operation [apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c] complete. Result: {
+    "done": true,
+    "metadata": {
+        "@type": "type.googleapis.com/google.appengine.v1.OperationMetadataV1",
+        "endTime": "2025-10-15T05:47:00.576Z",
+        "insertTime": "2025-10-15T05:46:11.409Z",
+        "method": "google.appengine.v1.Versions.CreateVersion",
+        "target": "apps/stringcost/services/worker/versions/20251015t102637",
+        "user": "stringcost-wsl@stringcost.iam.gserviceaccount.com",
+        "warning": [
+            "*** Improve build performance by generating and committing package-lock.json."
+        ]
+    },
+    "name": "apps/stringcost/operations/409f6f9d-e9ae-4813-8c89-c0b75ba0aa1c",
+    "response": {
+        "@type": "type.googleapis.com/google.appengine.v1.Version",
+        "basicScaling": {
+            "idleTimeout": "600s",
+            "maxInstances": 1
+        },
+        "createTime": "2025-10-15T05:46:53Z",
+        "diskUsageBytes": "4594002",
+        "env": "standard",
+        "id": "20251015t102637",
+        "instanceClass": "B2",
+        "name": "apps/stringcost/services/worker/versions/20251015t102637",
+        "network": {},
+        "runtime": "nodejs22",
+        "runtimeChannel": "default",
+        "servingStatus": "SERVING",
+        "threadsafe": true,
+        "versionUrl": "https://20251015t102637-dot-worker-dot-stringcost.appspot.com"
+    }
+}
+done.
+DEBUG: Operation [apps/stringcost/operations/cb114c70-8bb0-4580-910b-9b043c29290c] not complete. Waiting to retry.
+Setting traffic split for service [worker]...
+.......DEBUG: Operation [apps/stringcost/operations/cb114c70-8bb0-4580-910b-9b043c29290c] not complete. Waiting to retry.
+.................................DEBUG: Operation [apps/stringcost/operations/cb114c70-8bb0-4580-910b-9b043c29290c] complete. Result: {
+    "done": true,
+    "metadata": {
+        "@type": "type.googleapis.com/google.appengine.v1.OperationMetadataV1",
+        "endTime": "2025-10-15T05:47:07.587Z",
+        "insertTime": "2025-10-15T05:47:02.110Z",
+        "method": "google.appengine.v1.Services.UpdateService",
+        "target": "apps/stringcost/services/worker",
+        "user": "stringcost-wsl@stringcost.iam.gserviceaccount.com"
+    },
+    "name": "apps/stringcost/operations/cb114c70-8bb0-4580-910b-9b043c29290c",
+    "response": {
+        "@type": "type.googleapis.com/google.appengine.v1.Service",
+        "id": "worker",
+        "name": "apps/stringcost/services/worker",
+        "split": {
+            "allocations": {
+                "20251015t102637": 1
+            }
+        }
+    }
+}
+done.
+Stopping version [stringcost/worker/20251015t095311].
+DEBUG: Operation [apps/stringcost/operations/f2320ff7-3785-46ec-8863-fdf8cbd301d9] not complete. Waiting to retry.
+Waiting for operation [apps/stringcost/operations/f2320ff7-3785-46ec-8863-fdf8cbd301d9] to complete...
+.......DEBUG: Operation [apps/stringcost/operations/f2320ff7-3785-46ec-8863-fdf8cbd301d9] not complete. Waiting to retry.
+.................................DEBUG: Operation [apps/stringcost/operations/f2320ff7-3785-46ec-8863-fdf8cbd301d9] complete. Result: {
+    "done": true,
+    "metadata": {
+        "@type": "type.googleapis.com/google.appengine.v1.OperationMetadataV1",
+        "endTime": "2025-10-15T05:47:12.592Z",
+        "insertTime": "2025-10-15T05:47:10.415Z",
+        "method": "google.appengine.v1.Versions.UpdateVersion",
+        "target": "apps/stringcost/services/worker/versions/20251015t095311",
+        "user": "stringcost-wsl@stringcost.iam.gserviceaccount.com"
+    },
+    "name": "apps/stringcost/operations/f2320ff7-3785-46ec-8863-fdf8cbd301d9",
+    "response": {
+        "@type": "type.googleapis.com/google.appengine.v1.Version",
+        "basicScaling": {
+            "idleTimeout": "600s",
+            "maxInstances": 1
+        },
+        "createTime": "2025-10-15T04:28:09Z",
+        "createdBy": "stringcost-wsl@stringcost.iam.gserviceaccount.com",
+        "diskUsageBytes": "4594002",
+        "env": "standard",
+        "id": "20251015t095311",
+        "instanceClass": "B2",
+        "name": "apps/stringcost/services/worker/versions/20251015t095311",
+        "network": {},
+        "runtime": "nodejs22",
+        "runtimeChannel": "default",
+        "servingStatus": "STOPPED",
+        "threadsafe": true,
+        "versionUrl": "https://20251015t095311-dot-worker-dot-stringcost.appspot.com"
+    }
+}
+done.
+Deployed service [worker] to [https://worker-dot-stringcost.uc.r.appspot.com]
+Updating config [dispatch]...
+..DEBUG: Received operation: [apps/stringcost/operations/318999c4-886c-4ac8-8b48-5a01413087d4] with mask [dispatchRules,]
+DEBUG: Operation [apps/stringcost/operations/318999c4-886c-4ac8-8b48-5a01413087d4] not complete. Waiting to retry.
+Waiting for operation [apps/stringcost/operations/318999c4-886c-4ac8-8b48-5a01413087d4] to complete...
+................DEBUG: Operation [apps/stringcost/operations/318999c4-886c-4ac8-8b48-5a01413087d4] complete. Result: {
+    "done": true,
+    "metadata": {
+        "@type": "type.googleapis.com/google.appengine.v1.OperationMetadataV1",
+        "endTime": "2025-10-15T05:47:19.600Z",
+        "insertTime": "2025-10-15T05:47:18.733Z",
+        "method": "google.appengine.v1.Applications.UpdateApplication",
+        "target": "apps/stringcost",
+        "user": "stringcost-wsl@stringcost.iam.gserviceaccount.com"
+    },
+    "name": "apps/stringcost/operations/318999c4-886c-4ac8-8b48-5a01413087d4",
+    "response": {
+        "@type": "type.googleapis.com/google.appengine.v1.Application",
+        "authDomain": "gmail.com",
+        "codeBucket": "staging.stringcost.appspot.com",
+        "databaseType": "CLOUD_DATASTORE_COMPATIBILITY",
+        "defaultBucket": "stringcost.appspot.com",
+        "defaultHostname": "stringcost.uc.r.appspot.com",
+        "dispatchRules": [
+            {
+                "domain": "*",
+                "path": "/llm/*",
+                "service": "default"
+            },
+            {
+                "domain": "*",
+                "path": "/control/*",
+                "service": "control-plane"
+            },
+            {
+                "domain": "*",
+                "path": "/events/*",
+                "service": "event-collector"
+            }
+        ],
+        "featureSettings": {
+            "splitHealthChecks": true,
+            "useContainerOptimizedOs": true
+        },
+        "gcrDomain": "us.gcr.io",
+        "id": "stringcost",
+        "locationId": "us-central",
+        "name": "apps/stringcost",
+        "serviceAccount": "stringcost-wsl@stringcost.iam.gserviceaccount.com",
+        "servingStatus": "SERVING",
+        "sslPolicy": "DEFAULT"
+    }
+}
+done.
+done.
+
+Custom routings have been updated.
+
+You can stream logs from the command line by running:
+  $ gcloud app logs tail -s <service>
+
+To view your application in the web browser run:
+  $ gcloud app browse -s <service>
+DEBUG: Chosen display Format:none
+INFO: Display format: "none"
+DEBUG: SDK update checks are disabled.
+[GAE] Pruning old versions for service default (keeping 1)...
+Deleting the following versions:
+ - stringcost/default/20251015t095311
+Deleting [default/20251015t095311]...
+........done.
+[GAE] Pruning old versions for service control-plane (keeping 1)...
+Deleting the following versions:
+ - stringcost/control-plane/20251015t095311
+Deleting [control-plane/20251015t095311]...
+........done.
+[GAE] Pruning old versions for service event-collector (keeping 1)...
+Deleting the following versions:
+ - stringcost/event-collector/20251015t095311
+Deleting [event-collector/20251015t095311]...
+.......done.
+[GAE] Pruning old versions for service worker (keeping 1)...
+Deleting the following versions:
+ - stringcost/worker/20251015t095311
+Deleting [worker/20251015t095311]...
+........done.
+[GAE] Deployment complete.

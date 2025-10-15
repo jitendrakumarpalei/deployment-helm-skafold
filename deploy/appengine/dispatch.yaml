@@ -1,7 +1,7 @@
 dispatch:
-  - url: "api.stringcost.com/llm/*"
+  - url: "*/llm/*"
     service: default
-  - url: "api.stringcost.com/control/*"
+  - url: "*/control/*"
     service: control-plane
-  - url: "api.stringcost.com/events/*"
+  - url: "*/events/*"
     service: event-collector

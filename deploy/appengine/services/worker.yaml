@@ -1,0 +1,21 @@
+runtime: nodejs22
+service: worker
+entrypoint: npm start
+basic_scaling:
+  max_instances: 1
+  idle_timeout: 10m
+beta_settings:
+  cloud_sql_instances: stringcost:us-central1:stringcost-db
+handlers:
+  - url: /.*
+    script: auto
+    secure: always
+env_variables:
+  NODE_ENV: production
+  DATABASE_URL: postgresql://postgres:n5mp&/-`lu@93}Y{@172.16.128.3:5432/postgres?host=/cloudsql/stringcost:us-central1:stringcost-db
+  META_LLM_CLASSIFIER_ENDPOINT: https://classifier.yourdomain.com/api/classify
+  META_LLM_API_KEY: Idfdfd
+  WORKER_POLL_INTERVAL_MS: 500
+  WORKER_BATCH_SIZE: 5
+  WORKER_RESERVATION_TIMEOUT_MS: 300000
+  WORKER_RETENTION_MS: 86400000

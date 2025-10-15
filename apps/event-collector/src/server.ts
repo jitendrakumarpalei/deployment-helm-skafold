@@ -6,14 +6,14 @@ interface EventPayload extends LedgerEventInsert {
   prompt_content?: string;
 }
 
-const app = new Hono();
+const collectorApp = new Hono();
 
 export const dbPool = createPool();
 const ledgerRepo = new LedgerRepository(dbPool);
 
-app.get('/healthz', (c) => c.json({ status: 'ok' }));
+collectorApp.get('/healthz', (c) => c.json({ status: 'ok' }));
 
-app.post('/events', async (c) => {
+collectorApp.post('/events', async (c) => {
   const payload = await c.req.json<EventPayload>();
 
   if (!payload.run_id || !payload.user_id || !payload.outcome) {
@@ -29,5 +29,18 @@ app.post('/events', async (c) => {
 
   return c.json(record, 201);
 });
+
+function forwardToCollector(c: import('hono').Context) {
+  const url = new URL(c.req.url);
+  const stripped = url.pathname.replace(/^\/events/, '') || '/';
+  url.pathname = stripped.startsWith('/') ? stripped : `/${stripped}`;
+  const forwarded = new Request(url.toString(), c.req.raw);
+  return collectorApp.fetch(forwarded);
+}
+
+const app = new Hono();
+app.route('/', collectorApp);
+app.all('/events', (c) => forwardToCollector(c));
+app.all('/events/*', (c) => forwardToCollector(c));
 
 export default app;

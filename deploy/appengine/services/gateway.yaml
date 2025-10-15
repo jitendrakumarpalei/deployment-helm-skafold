@@ -1,0 +1,17 @@
+runtime: nodejs22
+service: default
+entrypoint: npm start
+automatic_scaling:
+  max_instances: 3
+  min_instances: 1
+beta_settings:
+  cloud_sql_instances: stringcost:us-central1:stringcost-db
+handlers:
+  - url: /.*
+    script: auto
+    secure: always
+env_variables:
+  NODE_ENV: production
+  DATABASE_URL: postgresql://postgres:n5mp&/-`lu@93}Y{@172.16.128.3:5432/postgres?host=/cloudsql/stringcost:us-central1:stringcost-db
+  META_LLM_CLASSIFIER_ENDPOINT: https://classifier.yourdomain.com/api/classify
+  META_LLM_API_KEY: Idfdfd

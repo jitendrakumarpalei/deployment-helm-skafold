@@ -27,6 +27,12 @@ fi
 CONFIG_RENDERER="${ROOT_DIR}/scripts/render-appengine-configs.mjs"
 ENV_FILE="${APPENGINE_ENV_FILE:-${ROOT_DIR}/deploy/appengine/.env}"
 
+if grep -E 'YOUR_|REPLACE_' "${ENV_FILE}" >/dev/null 2>&1; then
+  echo "[GAE] Environment file ${ENV_FILE} still contains placeholder values."
+  echo "      Please update it before deploying."
+  exit 1
+fi
+
 echo "[GAE] Rendering service configs using ${ENV_FILE}..."
 node "${CONFIG_RENDERER}" "${ENV_FILE}"
 echo "[GAE] Service configs generated."
@@ -59,6 +65,18 @@ if [[ "${PROJECT_FROM_JSON}" != "" ]]; then
 fi
 deploy_args+=("$@")
 
-gcloud app deploy "${deploy_args[@]}"
+gcloud --verbosity=debug app deploy "${deploy_args[@]}" --promote --stop-previous-version
+
+KEEP_VERSIONS=${KEEP_VERSIONS:-1}
+SERVICES=(default control-plane event-collector worker)
+
+for service in "${SERVICES[@]}"; do
+  echo "[GAE] Pruning old versions for service ${service} (keeping ${KEEP_VERSIONS})..."
+  mapfile -t versions < <(gcloud app versions list --service="${service}" --sort-by=~version.createTime --format='value(id)')
+  if ((${#versions[@]} > KEEP_VERSIONS)); then
+    to_delete=("${versions[@]:KEEP_VERSIONS}")
+    gcloud app versions delete "${to_delete[@]}" --service="${service}" --quiet || true
+  fi
+done
 
 echo "[GAE] Deployment complete."

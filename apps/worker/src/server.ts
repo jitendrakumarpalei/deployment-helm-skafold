@@ -26,9 +26,15 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-serve({
-  fetch: app.fetch,
-  port,
-});
+try {
+  serve({
+    fetch: app.fetch,
+    port,
+  });
 
-console.log(`Worker service listening on http://0.0.0.0:${port}`);
+  console.log(`Worker service listening on http://0.0.0.0:${port}`);
+} catch (error: unknown) {
+  const err = error instanceof Error ? error : new Error(String(error));
+  console.error('Failed to start worker service', err);
+  process.exit(1);
+}
