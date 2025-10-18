@@ -148,7 +148,7 @@ describeSuite('Gateway signed URL handling', () => {
       .set('Content-Type', 'application/json')
       .send(body);
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(403);
     expect(response.body.message).toMatch(/hash/i);
   });
 });
