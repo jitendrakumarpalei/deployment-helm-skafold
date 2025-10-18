@@ -37,10 +37,14 @@ Copy `.env.example` (if present) or export variables manually. The minimum requi
 export DATABASE_URL="postgres://stringcost:stringcost@localhost:5432/stringcost?sslmode=disable"
 export CONTROL_PLANE_URL="http://127.0.0.1:8787/control"
 export GATEWAY_BASE_URL="http://127.0.0.1:8787"
-export URL_TOKEN_KEY="$(openssl rand -base64 32)"
+export URL_TOKEN_KEYS="primary:$(openssl rand -base64 32)"
+export URL_TOKEN_CONFIG_KEY="$(openssl rand -base64 32)"
 export META_LLM_CLASSIFIER_ENDPOINT="http://127.0.0.1:8890/classify"
 export META_LLM_API_KEY="local-classifier"
 export WORKER_POLL_INTERVAL_MS="200"
+
+# Optional: override replay store and canonical host configuration
+export SIGNED_URL_DATABASE_URL="$DATABASE_URL"
 
 # Optional legacy variables (used when running the vendored Portkey UI/plugins)
 export ALBUS_BASEPATH="$CONTROL_PLANE_URL"
@@ -112,6 +116,7 @@ curl -X POST https://api.stringcost.com/control/v1/presign \
         "provider": "openai",
         "method": "POST",
         "path": "/v1/chat/completions",
+        "session_id": "018f1d5f-8aa5-7c93-a44a-53f97b07c1d3",
         "run_id": "6a9ab408-541f-40d3-af8a-5091c58cb89d",
         "user_id": "customer-4242",
         "metadata": {"tier": "gold"},
@@ -119,7 +124,7 @@ curl -X POST https://api.stringcost.com/control/v1/presign \
           "virtual_key": "vk-openai-prod",
           "retry": {"attempts": 3, "on_status_codes": [429] }
         },
-        "expires_in": 60
+        "expires_in": 45
       }'
 ```
 
@@ -127,16 +132,41 @@ curl -X POST https://api.stringcost.com/control/v1/presign \
 
 ```json
 {
-  "url": "https://api.stringcost.com/llm/v1/chat/completions?token=eyes-only",
-  "token": "eyes-only",
-  "expires_at": 1736899200
+  "url": "https://api.stringcost.com/llm/v1/chat/completions?kid=primary&client=...&provider=openai&method=POST&host=api.stringcost.com&path=/v1/chat/completions&exp=1731619200&nonce=0b0849d0-...&session=018f1d5f-8aa5-7c93-a44a-53f97b07c1d3&cfg=...&cfg_h=...&sig=...",
+  "session_id": "018f1d5f-8aa5-7c93-a44a-53f97b07c1d3",
+  "nonce": "0b0849d0-49b9-4a76-8f14-0b2d5b7bf7de",
+  "expires_at": 1731619200,
+  "kid": "primary"
 }
+```
+
+The query string carries everything the gateway needs to authenticate and route the request:
+
+| Param | Description |
+| --- | --- |
+| `kid` | Signing key identifier used to verify the HMAC. |
+| `client` | StringCost client ID associated with the API key. |
+| `provider` | Upstream provider (`openai`, `anthropic`, …). |
+| `method` | HTTP verb locked into the pre-signed request. |
+| `host` | Expected gateway host; compared (hostname + optional port) to the actual request. |
+| `path` | Canonical provider path (without the `/llm` prefix). |
+| `exp` | Expiry timestamp (epoch seconds). Default 60s, configurable via `expires_in` (capped at 600s). |
+| `nonce` + `session` | UUID values used for replay detection (one-time use). |
+| `body` | Optional lowercase hex SHA-256 hash that must match the request body. |
+| `cfg` / `cfg_h` | AES-GCM encrypted provider config (API keys, virtual key) and its hash. |
+| `run`, `user`, `scope`, `meta` | Optional tracing metadata propagated to the ledger. |
+| `sig` | Base64url HMAC-SHA256 over the canonical request string. |
+
+Canonical string (used for signature verification):
+
+```
+METHOD\nHOST\nPATH\nBODY_HASH\nEXP\nNONCE\nSESSION\nCLIENT\nPROVIDER\nSCOPE\nCFG_HASH\nRUN_ID\nUSER_ID\nMETADATA_HASH
 ```
 
 ### 2. Call the gateway using the signed URL
 
 ```bash
-curl "https://api.stringcost.com/llm/v1/chat/completions?token=eyes-only" \
+curl "https://api.stringcost.com/llm/v1/chat/completions?kid=...&client=...&...&sig=..." \
   -H "Authorization: Bearer sk-openai-real" \
   -H "Content-Type: application/json" \
   -d '{
@@ -171,6 +201,16 @@ curl https://api.stringcost.com/events \
 
 The event collector inserts the record into `ledger_events` and enqueues the prompt for meta-classification. The worker updates `action_type` once the classifier responds.
 
+### Signed URL security notes
+
+- **Key management:** Configure `URL_TOKEN_KEYS="kid1:base64key,kid2:base64key"` (32-byte HMAC keys). Optionally set `URL_TOKEN_PRIMARY_KID` to select the active signing key.
+- **Config encryption:** `URL_TOKEN_CONFIG_KEY` supplies the AES-256-GCM key that encrypts provider secrets inside the `cfg` parameter (falls back to the primary signing key when omitted).
+- **Replay protection:** The gateway stores `(session_id, nonce)` pairs in `signed_url_replays`. Point `SIGNED_URL_DATABASE_URL` at PostgreSQL (defaults to `DATABASE_URL`). If unreachable, an in-memory fallback enforces best-effort protection.
+- **TTL bounds:** `SIGNED_URL_DEFAULT_TTL` (60s) and `SIGNED_URL_MAX_TTL` (600s) clamp the allowed `expires_in` value.
+- **Body integrity:** Include `body_sha256` when the payload is known in advance. The gateway recomputes the hash and rejects mismatches.
+- **Traceability:** Optional `run_id`, `user_id`, `scope`, and structured `metadata` flow through the token and into the ledger with the signature covering their values.
+- **Testing:** Supertest suites for the control-plane and gateway require socket binds. Set `ENABLE_SUPERTEST=true` before running the workspace tests (CI already does this).
+
 ## Presign Request Fields
 
 | Field | Purpose |
@@ -185,7 +225,7 @@ The event collector inserts the record into `ledger_events` and enqueues the pro
 | `body_sha256` | Optional hex digest to bind the token to an exact request payload. |
 | `expires_in` | Time-to-live for the URL in seconds (defaults to `60`, max `600`). |
 
-The control plane encrypts the payload with AES-256-GCM using `URL_TOKEN_KEY`. The gateway decrypts it, validates method/path/expiry, injects internal `x-portkey-*` headers, and then hands the request to the vendored gateway.
+The control plane signs a canonical request string with HMAC-SHA256 (using the key identified by `kid`) and encrypts the provider configuration with AES-256-GCM (`URL_TOKEN_CONFIG_KEY`). The gateway validates the signature, enforces method/path/body/host scoping, records the `(session, nonce)` pair, decrypts the config, and forwards the call to the vendored Portkey router with internal `x-portkey-*` headers.
 
 ## Operational Notes
 

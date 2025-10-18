@@ -1,7 +1,6 @@
-import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import { getPool } from './db.js';
-import { sealSignedRequest } from '../shared/urlToken';
+import { createSignedUrl } from '../shared/signedUrl';
 
 const controlRoutes = new Hono();
 
@@ -140,10 +139,10 @@ interface PresignRequestBody {
   body_sha256?: string;
   expires_in?: number;
   config?: Record<string, unknown>;
+  session_id?: string;
+  scope?: string;
+  nonce?: string;
 }
-
-const DEFAULT_TOKEN_TTL = Number(process.env.SIGNED_URL_DEFAULT_TTL ?? '60');
-const MAX_TOKEN_TTL = Number(process.env.SIGNED_URL_MAX_TTL ?? '600');
 
 function sanitizeMetadata(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -160,12 +159,6 @@ function normalizePath(input: string): string {
     return `/${input}`;
   }
   return input;
-}
-
-function clampExpiry(expiresIn?: number): number {
-  const base = Number.isFinite(expiresIn) ? Number(expiresIn) : DEFAULT_TOKEN_TTL;
-  const bounded = Math.max(1, Math.min(base, MAX_TOKEN_TTL));
-  return Math.floor(Date.now() / 1000) + bounded;
 }
 
 function resolveGatewayBase(): string {
@@ -241,6 +234,8 @@ controlRoutes.post('/v1/presign', async (c) => {
     ...overrides,
     provider: (overrides as Record<string, unknown>).provider ?? cred.provider,
     api_key: cred.provider_api_key,
+    virtual_key: cred.virtual_key ?? undefined,
+    credential_metadata: cred.metadata ?? undefined,
   };
 
   if (typeof routeConfig.provider !== 'string') {
@@ -252,34 +247,35 @@ controlRoutes.post('/v1/presign', async (c) => {
   }
 
   const metadata = sanitizeMetadata(body.metadata);
-  const expiresAt = clampExpiry(body.expires_in);
-  const payload = {
-    v: 1,
-    client_id: clientId,
-    provider: cred.provider,
-    route_config: routeConfig,
-    virtual_key: cred.virtual_key ?? undefined,
-    credential_metadata: cred.metadata ?? undefined,
-    method,
-    path,
-    run_id: body.run_id,
-    user_id: body.user_id,
-    metadata,
-    body_sha256: body.body_sha256,
-    issued_at: Math.floor(Date.now() / 1000),
-    exp: expiresAt,
-    nonce: randomUUID(),
-  };
-
-  const token = sealSignedRequest(payload);
   const baseUrl = resolveGatewayBase();
+  const canonicalHost = new URL(baseUrl).host;
+
+  const signed = createSignedUrl({
+    method,
+    host: canonicalHost,
+    path,
+    bodyHash: body.body_sha256?.toLowerCase(),
+    clientId,
+    provider: cred.provider,
+    scope: body.scope,
+    sessionId: body.session_id,
+    runId: body.run_id,
+    userId: body.user_id,
+    metadata,
+    nonce: body.nonce,
+    expiresIn: body.expires_in,
+    routeConfig,
+  });
+
   const presignedUrl = new URL(`${baseUrl}/llm${path}`);
-  presignedUrl.searchParams.set('token', token);
+  signed.params.forEach((value, key) => presignedUrl.searchParams.set(key, value));
 
   return c.json({
     url: presignedUrl.toString(),
-    token,
-    expires_at: expiresAt,
+    expires_at: signed.expiresAt,
+    session_id: signed.sessionId,
+    nonce: signed.nonce,
+    kid: signed.params.get('kid'),
   });
 });
 

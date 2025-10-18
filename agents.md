@@ -20,6 +20,7 @@ This memo captures how the current StringCost codebase came together—from rece
 | Oct 16 | Renamed migrations to millisecond timestamps (e.g., `1735689600000_initial_schema.cjs`) so `node-pg-migrate` stops printing “Can't determine timestamp” warnings in CI. |
 | Oct 17 | Updated README with accurate curl examples, environment instructions, and observability notes. |
 | Oct 18 | Refactored runtime auth: introduced encrypted pre-signed URLs, dropped custom headers, added presign endpoint + shared AES/HMAC helpers. |
+| Oct 18 | Replaced encrypted blob tokens with canonical HMAC-signed URLs (kid/session/nonce) + optional body hash and encrypted config payload. Added replay store integration. |
 | Oct 18 | Added supertest gateway API suite gated by `ENABLE_SUPERTEST`; updated docs & tests to honour URL-only flow. |
 | Oct 18 | This post-mortem drafted—documenting lessons, outstanding work, and recommended next steps. |
 
@@ -140,6 +141,7 @@ Vendored Portkey Gateway
 | `tests/langchain/proxy.test.ts` | End-to-end test covering control plane → gateway → event collector → worker. |
 | `tests/control-plane/presign.api.test.ts` | Supertest smoke for `/v1/presign`, gated by `ENABLE_SUPERTEST`. |
 | `tests/gateway/gateway.api.test.ts` | Supertest suite validating signed URL enforcement (skips automatically when sockets cannot be bound). |
+| `apps/shared/signedUrl.ts` | Canonical signing utilities (HMAC) and config encryption helpers used by presign + gateway validation. |
 | `deploy/appengine/deploy.sh` | Builds, stages, and deploys all services with `--promote --stop-previous-version`; includes version pruning. |
 | `PORTKEY_TAG` | Homed commit of vendored Portkey gateway (`971c72a38cf0e0632f475365d71bda1020e4f66f`). |
 
@@ -157,6 +159,7 @@ curl -X POST https://api.stringcost.com/control/v1/presign \
         "provider": "openai",
         "method": "POST",
         "path": "/v1/chat/completions",
+        "session_id": "018f1d5f-8aa5-7c93-a44a-53f97b07c1d3",
         "run_id": "$(uuidgen)",
         "user_id": "customer-4242",
         "metadata": {"environment": "prod"},
@@ -167,7 +170,7 @@ curl -X POST https://api.stringcost.com/control/v1/presign \
 ### Step 2 – call the proxy with provider headers
 
 ```bash
-curl "https://api.stringcost.com/llm/v1/chat/completions?token=eyes-only" \
+curl "https://api.stringcost.com/llm/v1/chat/completions?kid=...&client=...&...&sig=..." \
   -H "Authorization: Bearer sk-openai-real" \
   -H "Content-Type: application/json" \
   -d '{

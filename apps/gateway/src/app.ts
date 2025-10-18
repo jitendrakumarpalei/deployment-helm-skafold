@@ -3,7 +3,8 @@ import { Hono, type Context } from 'hono';
 import portkeyApp from '../../../vendor/portkey-gateway/src/index';
 import { adaptResponse } from './middleware/responseAdapter';
 import { createForwardRequest } from './middleware/requestAdapter';
-import { unsealSignedRequest } from '../../shared/urlToken';
+import { verifySignedRequest } from '../../shared/signedUrl';
+import { assertNonce } from './replayStore';
 
 const app = new Hono();
 
@@ -12,52 +13,79 @@ app.get('/healthz', (c) => c.json({ status: 'ok' }));
 const handlePortkey = async (c: Context) => {
   const originalRequest = c.req.raw;
   const url = new URL(originalRequest.url);
-  const token = url.searchParams.get('token');
-  if (!token) {
-    return c.json({ message: 'Missing signed token' }, 400);
-  }
+  const search = url.searchParams;
 
-  let payload;
-  try {
-    payload = unsealSignedRequest(token);
-  } catch (error) {
-    return c.json({ message: 'Invalid or expired token' }, 403);
+  if (!search.has('kid')) {
+    return c.json({ message: 'Missing signed parameters' }, 400);
   }
 
   const requestPath = c.req.path.startsWith('/llm') ? c.req.path.slice(4) || '/' : c.req.path;
-  if (requestPath !== payload.path) {
-    return c.json({ message: 'Token path mismatch' }, 403);
+  const expectedBodyHash = search.get('body');
+  const actualBodyHash = expectedBodyHash ? await hashRequestBody(originalRequest) : undefined;
+
+  let verified;
+  try {
+    verified = await verifySignedRequest(search, {
+      method: originalRequest.method,
+      host: url.host,
+      path: requestPath,
+      bodyHash: actualBodyHash,
+    });
+  } catch (error) {
+    return c.json({ message: (error as Error).message || 'Invalid signed URL' }, 403);
   }
 
-  if (c.req.method.toUpperCase() !== payload.method) {
-    return c.json({ message: 'Token method mismatch' }, 403);
-  }
-
-  if (payload.body_sha256) {
-    const hashedBody = await hashRequestBody(originalRequest);
-    if (hashedBody !== payload.body_sha256.toLowerCase()) {
-      return c.json({ message: 'Request body hash mismatch' }, 400);
-    }
+  try {
+    await assertNonce(verified.sessionId, verified.nonce, verified.expiresAt);
+  } catch (error) {
+    return c.json({ message: (error as Error).message || 'Signed URL replay detected' }, 409);
   }
 
   const forwardedHeaders = new Headers(originalRequest.headers);
-  forwardedHeaders.set('x-portkey-provider', payload.provider);
-  forwardedHeaders.set('x-portkey-config', JSON.stringify(payload.route_config));
-  if (payload.virtual_key) {
-    forwardedHeaders.set('x-portkey-virtual-key', payload.virtual_key);
+  forwardedHeaders.set('x-portkey-provider', verified.provider);
+  const { virtual_key, credential_metadata, ...routeConfig } = verified.routeConfig as Record<string, unknown>;
+  forwardedHeaders.set('x-portkey-config', JSON.stringify(routeConfig));
+  if (virtual_key) {
+    forwardedHeaders.set('x-portkey-virtual-key', String(virtual_key));
   }
-  if (payload.run_id) {
-    forwardedHeaders.set('x-stringcost-run-id', payload.run_id);
+  if (verified.runId) {
+    forwardedHeaders.set('x-stringcost-run-id', verified.runId);
   }
-  if (payload.user_id) {
-    forwardedHeaders.set('x-stringcost-user-id', payload.user_id);
+  if (verified.userId) {
+    forwardedHeaders.set('x-stringcost-user-id', verified.userId);
   }
-  if (payload.metadata) {
-    forwardedHeaders.set('x-stringcost-metadata', JSON.stringify(payload.metadata));
+  if (verified.metadata) {
+    forwardedHeaders.set('x-stringcost-metadata', JSON.stringify(verified.metadata));
+  }
+  if (verified.scope) {
+    forwardedHeaders.set('x-stringcost-scope', verified.scope);
+  }
+  if (credential_metadata) {
+    forwardedHeaders.set('x-stringcost-credential-metadata', JSON.stringify(credential_metadata));
   }
 
+  const stripParams = [
+    'kid',
+    'client',
+    'provider',
+    'method',
+    'host',
+    'path',
+    'exp',
+    'nonce',
+    'session',
+    'cfg',
+    'cfg_h',
+    'sig',
+    'scope',
+    'body',
+    'run',
+    'user',
+    'meta',
+  ];
+
   const forwardedRequest = await createForwardRequest(originalRequest, forwardedHeaders, {
-    stripQueryParams: ['token'],
+    stripQueryParams: stripParams,
   });
   let executionCtx: Context['executionCtx'] | undefined;
   try {

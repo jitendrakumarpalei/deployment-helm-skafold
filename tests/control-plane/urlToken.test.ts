@@ -1,40 +1,47 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { sealSignedRequest, unsealSignedRequest, resolveUrlTokenKey } from '../../apps/shared/urlToken';
+import { createSignedUrl, verifySignedRequest } from '../../apps/shared/signedUrl';
 
-describe('urlToken', () => {
-  const key = Buffer.alloc(32, 1);
-  let originalEnv: string | undefined;
+describe('signedUrl', () => {
+  const key = Buffer.alloc(32, 1).toString('base64');
+  let originalKey: string | undefined;
 
   beforeEach(() => {
-    originalEnv = process.env.URL_TOKEN_KEY;
-    process.env.URL_TOKEN_KEY = key.toString('base64');
+    originalKey = process.env.URL_TOKEN_KEY;
+    process.env.URL_TOKEN_KEY = key;
   });
 
   afterEach(() => {
-    if (originalEnv === undefined) {
+    if (originalKey === undefined) {
       delete process.env.URL_TOKEN_KEY;
     } else {
-      process.env.URL_TOKEN_KEY = originalEnv;
+      process.env.URL_TOKEN_KEY = originalKey;
     }
   });
 
-  it('round-trips payloads via seal/unseal', () => {
-    const payload = {
-      v: 1,
-      client_id: 'client-123',
-      provider: 'openai',
-      route_config: { provider: 'openai', api_key: 'sk-test' },
+  it('round-trips signed parameters', async () => {
+    const signed = createSignedUrl({
       method: 'POST',
+      host: 'api.stringcost.com',
       path: '/v1/chat/completions',
-      issued_at: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 60,
-      nonce: 'abc',
-    };
+      clientId: 'client-123',
+      provider: 'openai',
+      runId: 'run-1',
+      userId: 'user-7',
+      metadata: { tier: 'test' },
+      routeConfig: { provider: 'openai', api_key: 'sk-test' },
+    });
 
-    const token = sealSignedRequest(payload, resolveUrlTokenKey());
-    const decoded = unsealSignedRequest(token, resolveUrlTokenKey());
-    expect(decoded.provider).toBe(payload.provider);
-    expect(decoded.route_config).toEqual(payload.route_config);
-    expect(decoded.method).toBe('POST');
+    const verified = await verifySignedRequest(signed.params, {
+      method: 'POST',
+      host: 'api.stringcost.com',
+      path: '/v1/chat/completions',
+    });
+
+    expect(verified.provider).toBe('openai');
+    expect(verified.clientId).toBe('client-123');
+    expect(verified.runId).toBe('run-1');
+    expect(verified.userId).toBe('user-7');
+    expect(verified.metadata).toEqual({ tier: 'test' });
+    expect(verified.routeConfig.api_key).toBe('sk-test');
   });
 });

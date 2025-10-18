@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer';
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
 import app from '../../apps/gateway/src/app';
 import portkeyApp from '../../vendor/portkey-gateway/src/index';
-import { sealSignedRequest } from '../../apps/shared/urlToken';
+import { createSignedUrl } from '../../apps/shared/signedUrl';
 
 let portkeyFetchSpy: ReturnType<typeof vi.spyOn> | undefined;
 let forwardedRequest: Request | undefined;
@@ -13,6 +13,7 @@ describe('StringCost Gateway Wrapper', () => {
   beforeEach(() => {
     forwardedRequest = undefined;
     process.env.URL_TOKEN_KEY = urlTokenKey;
+    process.env.GATEWAY_BASE_URL = 'http://test';
   });
 
   afterEach(() => {
@@ -51,24 +52,22 @@ describe('StringCost Gateway Wrapper', () => {
         );
       });
 
-    const payload = {
-      v: 1,
-      client_id: 'client-1',
-      provider: 'openai',
-      route_config: { provider: 'openai', api_key: 'sk-openai-real' },
-      virtual_key: 'vk-openai-demo',
+    const signed = createSignedUrl({
       method: 'POST',
+      host: 'test',
       path: '/v1/chat/completions',
-      run_id: 'run-123',
-      user_id: 'user-456',
+      clientId: 'client-1',
+      provider: 'openai',
+      runId: 'run-123',
+      userId: 'user-456',
       metadata: { tier: 'gold' },
-      issued_at: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 60,
-      nonce: 'nonce-1'
-    };
-    const token = sealSignedRequest(payload);
+      routeConfig: { provider: 'openai', api_key: 'sk-openai-real' }
+    });
 
-    const response = await app.request(`http://test/llm${payload.path}?token=${token}`, {
+    const url = new URL('http://test/llm/v1/chat/completions');
+    signed.params.forEach((value, key) => url.searchParams.set(key, value));
+
+    const response = await app.request(url.toString(), {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -104,6 +103,6 @@ describe('StringCost Gateway Wrapper', () => {
     const body = await response.json();
 
     expect(response.status).toBe(400);
-    expect(body.message).toMatch(/token/i);
+    expect(body.message).toMatch(/signed/i);
   });
 });

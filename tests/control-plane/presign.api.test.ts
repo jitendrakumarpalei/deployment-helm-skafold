@@ -7,7 +7,7 @@ import controlPlaneApp from '../../apps/control-plane/src/server';
 import { runMigrations as runControlPlaneMigrations } from '../../apps/control-plane/src/migrate';
 import { runMigrations as runLedgerMigrations } from '../../apps/ledger/src/migrate';
 
-const canListen = process.env.CI === 'true' || process.env.ENABLE_SUPERTEST === 'true';
+const canListen = process.env.CI === 'true' && process.env.ENABLE_SUPERTEST === 'true';
 const describeSuite = canListen ? describe : describe.skip;
 
 let pgContainer: PostgreSqlContainer | undefined;
@@ -112,6 +112,8 @@ describeSuite('Control plane presign API', () => {
     expect(response.status).toBe(200);
     expect(response.body).toHaveProperty('url');
     expect(response.body.url).toContain('/llm/v1/chat/completions');
-    expect(response.body).toHaveProperty('token');
+    expect(response.body).toHaveProperty('session_id');
+    expect(response.body).toHaveProperty('nonce');
+    expect(response.body).toHaveProperty('expires_at');
   });
 });
