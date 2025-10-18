@@ -1,13 +1,16 @@
 import { Hono } from 'hono';
-import { getPool, withClient } from './db.js';
+import { getPool } from './db.js';
 
-const controlApp = new Hono();
+const controlRoutes = new Hono();
 
-controlApp.get('/healthz', (c) => c.json({ status: 'ok' }));
+controlRoutes.get('/healthz', (c) => c.json({ status: 'ok' }));
 
 function extractApiKey(c: any): string | null {
   const auth = c.req.header('authorization') || '';
   if (auth.startsWith('Bearer ')) {
+    if (process.env.DEBUG_CONTROL_PLANE === '1') {
+      console.log('Authorization header detected');
+    }
     return auth.slice('Bearer '.length).trim();
   }
   return c.req.header('x-stringcost-api-key') || null;
@@ -28,9 +31,13 @@ interface ProviderCredentialRow {
   metadata: unknown;
 }
 
-controlApp.get('/v2/models', async (c) => {
+controlRoutes.get('/v2/models', async (c) => {
   const apiKey = extractApiKey(c);
   if (!apiKey) {
+    if (process.env.DEBUG_CONTROL_PLANE === '1') {
+      console.error('Control plane: missing API key');
+      console.error('Headers:', Object.fromEntries(c.req.raw.headers));
+    }
     return c.json({ message: 'Missing API key' }, 401);
   }
 
@@ -40,6 +47,9 @@ controlApp.get('/v2/models', async (c) => {
     [apiKey]
   );
   if (clientRow.rows.length === 0) {
+    if (process.env.DEBUG_CONTROL_PLANE === '1') {
+      console.error('Control plane: invalid API key', apiKey);
+    }
     return c.json({ message: 'Invalid API key' }, 403);
   }
   const clientId = clientRow.rows[0].id;
@@ -66,9 +76,13 @@ controlApp.get('/v2/models', async (c) => {
   return c.json({ data });
 });
 
-controlApp.get('/v1/account/config', async (c) => {
+controlRoutes.get('/v1/account/config', async (c) => {
   const apiKey = extractApiKey(c);
   if (!apiKey) {
+    if (process.env.DEBUG_CONTROL_PLANE === '1') {
+      console.error('Control plane: missing API key');
+      console.error('Headers:', Object.fromEntries(c.req.raw.headers));
+    }
     return c.json({ message: 'Missing API key' }, 401);
   }
 
@@ -79,6 +93,9 @@ controlApp.get('/v1/account/config', async (c) => {
     [apiKey]
   );
   if (clientResult.rows.length === 0) {
+    if (process.env.DEBUG_CONTROL_PLANE === '1') {
+      console.error('Control plane: invalid API key', apiKey);
+    }
     return c.json({ message: 'Invalid API key' }, 403);
   }
   const clientId = clientResult.rows[0].id;
@@ -110,17 +127,8 @@ controlApp.get('/v1/account/config', async (c) => {
   return c.json({ provider: cred.provider, config });
 });
 
-function forwardToControl(c: import('hono').Context) {
-  const url = new URL(c.req.url);
-  const stripped = url.pathname.replace(/^\/control/, '') || '/';
-  url.pathname = stripped.startsWith('/') ? stripped : `/${stripped}`;
-  const forwarded = new Request(url.toString(), c.req.raw);
-  return controlApp.fetch(forwarded);
-}
-
 const app = new Hono();
-app.route('/', controlApp);
-app.all('/control', (c) => forwardToControl(c));
-app.all('/control/*', (c) => forwardToControl(c));
+app.route('/', controlRoutes);
+app.route('/control', controlRoutes);
 
 export default app;

@@ -6,6 +6,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { runMigrations as runLedgerMigrations } from '../../apps/ledger/src/migrate';
 import { runMigrations as runControlPlaneMigrations } from '../../apps/control-plane/src/migrate';
 import controlPlaneApp from '../../apps/control-plane/src/server';
+import { closePool as closeControlPlanePool } from '../../apps/control-plane/src/db';
 import { runWorkerOnce } from '../../apps/worker/src/worker';
 
 const CONTROL_PLANE_BASE = 'http://control.stringcost.local';
@@ -87,6 +88,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await pool.end();
   await eventDbPool.end();
+  await closeControlPlanePool();
   if (pgContainer) {
     await pgContainer.stop();
   }
@@ -112,9 +114,7 @@ describe('LangChain → StringCost Gateway', () => {
         const headers = new Headers(
           init.headers ?? (requestIsRequest ? input.headers : undefined) ?? {}
         );
-        if (!headers.has('authorization')) {
-          headers.set('authorization', 'Bearer sk-stringcost-123');
-        }
+        headers.set('authorization', 'Bearer sk-stringcost-123');
         if (!headers.has('x-stringcost-run-id')) {
           headers.set('x-stringcost-run-id', runId);
         }

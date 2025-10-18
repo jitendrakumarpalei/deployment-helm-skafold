@@ -32,7 +32,9 @@ async function ensureProviderHeaders(headers: Headers): Promise<void> {
     headers.set('x-stringcost-provider', provider);
   }
 
-  const hasConfig = Boolean(parsedConfig?.provider && parsedConfig?.config?.api_key);
+  const hasConfig =
+    Boolean(parsedConfig?.provider && parsedConfig?.api_key) ||
+    Boolean(parsedConfig?.provider && parsedConfig?.config?.api_key);
 
   if (provider && hasConfig) {
     return;
@@ -63,17 +65,37 @@ async function ensureProviderHeaders(headers: Headers): Promise<void> {
 
   if (!resp.ok) {
     const errorBody = await resp.text();
+    console.error('Control plane configuration fetch failed', resp.status, errorBody);
     throw new Error(`Control plane error (${resp.status}): ${errorBody}`);
   }
 
   const data = await resp.json();
-  const resolvedConfig = data?.config;
-  if (!resolvedConfig?.provider) {
+  if (process.env.DEBUG_GATEWAY_CONFIG === '1') {
+    console.log('Resolved config from control plane', JSON.stringify(data));
+  }
+  const resolvedConfig = data?.config ?? {};
+  const resolvedProvider =
+    resolvedConfig.provider ?? provider ?? data?.provider;
+  const resolvedApiKey =
+    resolvedConfig.api_key ?? resolvedConfig.config?.api_key ?? null;
+  const resolvedVirtualKey =
+    resolvedConfig.virtual_key ?? resolvedConfig.config?.virtual_key ?? null;
+
+  if (!resolvedProvider || !resolvedApiKey) {
     throw new Error('Control plane response missing provider configuration.');
   }
 
-  headers.set('x-stringcost-provider', resolvedConfig.provider);
-  headers.set('x-stringcost-config', JSON.stringify(resolvedConfig));
+  const normalizedConfig = {
+    ...(resolvedConfig.config ?? {}),
+    provider: resolvedProvider,
+    api_key: resolvedApiKey,
+  };
+
+  headers.set('x-stringcost-provider', resolvedProvider);
+  if (resolvedVirtualKey) {
+    headers.set('x-stringcost-virtual-key', resolvedVirtualKey);
+  }
+  headers.set('x-stringcost-config', JSON.stringify(normalizedConfig));
 }
 
 const app = new Hono();
@@ -109,6 +131,12 @@ const handlePortkey = async (c: Context) => {
   }
 
   const response = await portkeyApp.fetch(forwardedRequest, env, executionCtx);
+  if (process.env.DEBUG_GATEWAY_FORWARD === '1') {
+    const cloned = response.clone();
+    const bodyText = await cloned.text();
+    console.log('Portkey response status', response.status);
+    console.log('Portkey response body', bodyText);
+  }
   return adaptResponse(response);
 };
 

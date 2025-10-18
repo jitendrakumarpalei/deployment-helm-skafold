@@ -23,3 +23,10 @@ export async function withClient<T>(fn: (client: import('pg').PoolClient) => Pro
     client.release();
   }
 }
+
+export async function closePool(): Promise<void> {
+  if (pool) {
+    await pool.end();
+    pool = null;
+  }
+}
