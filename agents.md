@@ -20,6 +20,7 @@ This memo captures how the current StringCost codebase came together—from rece
 | Oct 16 | Renamed migrations to millisecond timestamps (e.g., `1735689600000_initial_schema.cjs`) so `node-pg-migrate` stops printing “Can't determine timestamp” warnings in CI. |
 | Oct 17 | Updated README with accurate curl examples, environment instructions, and observability notes. |
 | Oct 18 | Refactored runtime auth: introduced encrypted pre-signed URLs, dropped custom headers, added presign endpoint + shared AES/HMAC helpers. |
+| Oct 18 | Added supertest gateway API suite gated by `ENABLE_SUPERTEST`; updated docs & tests to honour URL-only flow. |
 | Oct 18 | This post-mortem drafted—documenting lessons, outstanding work, and recommended next steps. |
 
 ---
@@ -69,9 +70,9 @@ Vendored Portkey Gateway
 
 ## 3. Testing & CI
 
-- **framework:** Vitest (v1.6.1) with Testcontainers for PostgreSQL; supertest-based API suites run alongside unit tests.  
+- **framework:** Vitest (v1.6.1) with Testcontainers for PostgreSQL; optional supertest API suites run when `ENABLE_SUPERTEST=true`.  
 - **critical test:** `tests/langchain/proxy.test.ts` exercises the presign flow → signed URL invocation → event collector → worker classification; asserts ledger enrichment and queue drain.  
-- **other tests:** migration smoke tests, worker classification, event collector API, gateway signed-token handling.
+- **other tests:** migration smoke tests, worker classification, event collector API, gateway signed-token handling. Gateway API suite (`tests/gateway/gateway.api.test.ts`) is skipped automatically when sockets cannot be bound.
 - **CI adjustments:**  
   - GitHub Actions (`.github/workflows/ci.yml`) runs Postgres and Redis services but only Postgres is used.  
   - `TESTCONTAINERS_RYUK_DISABLED=true` to avoid docker-in-docker permission issues.  

@@ -92,7 +92,7 @@ To run only the ledger integrations (LangChain proxy + worker + migrations):
 TESTCONTAINERS_RYUK_DISABLED=true npm run test:ledger
 ```
 
-Signed URL gateway API tests use `supertest` and require the ability to bind ephemeral ports. Set `ENABLE_SUPERTEST=true` before running `npm run test --workspace @stringcost/gateway` if your environment allows socket binds (GitHub Actions does by default).
+Signed URL gateway API tests use `supertest` and must bind to a local socket. Enable them by exporting `ENABLE_SUPERTEST=true` before running `npm run test --workspace @stringcost/gateway` (CI jobs can set this automatically; local sandboxes without socket access will skip the suite).
 
 ## API Usage
 
