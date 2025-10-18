@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
@@ -10,6 +11,7 @@ import { closePool as closeControlPlanePool } from '../../apps/control-plane/src
 import { runWorkerOnce } from '../../apps/worker/src/worker';
 
 const CONTROL_PLANE_BASE = 'http://control.stringcost.local';
+const GATEWAY_BASE = 'http://test';
 
 let pgContainer: PostgreSqlContainer | undefined;
 let pool: Pool;
@@ -17,6 +19,7 @@ let databaseUrl: string;
 let gatewayApp: typeof import('../../apps/gateway/src/app').default;
 let eventCollectorApp: typeof import('../../apps/event-collector/src/server').default;
 let eventDbPool: typeof import('../../apps/event-collector/src/server').dbPool;
+let originalUrlTokenKey: string | undefined;
 
 async function resetDatabase(url: string) {
   const client = new Pool({ connectionString: url });
@@ -53,6 +56,9 @@ async function seedControlPlane(db: Pool) {
 beforeAll(async () => {
   process.env.CONTROL_PLANE_URL = CONTROL_PLANE_BASE;
   process.env.ALBUS_BASEPATH = CONTROL_PLANE_BASE;
+  process.env.GATEWAY_BASE_URL = GATEWAY_BASE;
+  originalUrlTokenKey = process.env.URL_TOKEN_KEY;
+  process.env.URL_TOKEN_KEY = Buffer.alloc(32, 11).toString('base64');
 
   if (process.env.TEST_DATABASE_URL) {
     databaseUrl = process.env.TEST_DATABASE_URL;
@@ -92,6 +98,11 @@ afterAll(async () => {
   if (pgContainer) {
     await pgContainer.stop();
   }
+  if (originalUrlTokenKey === undefined) {
+    delete process.env.URL_TOKEN_KEY;
+  } else {
+    process.env.URL_TOKEN_KEY = originalUrlTokenKey;
+  }
   vi.restoreAllMocks();
 });
 
@@ -108,40 +119,45 @@ describe('LangChain → StringCost Gateway', () => {
             ? input.toString()
             : input.url;
 
-      if (requestUrl.startsWith('http://test/llm')) {
+      if (requestUrl.startsWith(`${GATEWAY_BASE}/llm`)) {
         const requestIsRequest = typeof Request !== 'undefined' && input instanceof Request;
         const method = init.method ?? (requestIsRequest ? input.method : 'GET');
         const headers = new Headers(
           init.headers ?? (requestIsRequest ? input.headers : undefined) ?? {}
         );
-        headers.set('authorization', 'Bearer sk-stringcost-123');
-        if (!headers.has('x-stringcost-run-id')) {
-          headers.set('x-stringcost-run-id', runId);
-        }
-        if (!headers.has('x-stringcost-user-id')) {
-          headers.set('x-stringcost-user-id', 'user-langchain');
-        }
 
         let body: BodyInit | undefined = init.body;
         if (!body && requestIsRequest) {
           body = await input.clone().text();
         }
 
-        const gatewayRequest = new Request(requestUrl, {
+        const presignResponse = await controlPlaneApp.request('/v1/presign', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            authorization: 'Bearer sk-stringcost-123',
+          },
+          body: JSON.stringify({
+            provider: 'openai',
+            method,
+            path: requestUrl.replace(`${GATEWAY_BASE}/llm`, '') || '/',
+            run_id: runId,
+            user_id: 'user-langchain',
+            metadata: { test: true },
+          }),
+        });
+
+        if (!presignResponse.ok) {
+          throw new Error(`Presign failed: ${presignResponse.status}`);
+        }
+
+        const presignBody = await presignResponse.json<Record<string, string>>();
+        const signedUrl = presignBody.url;
+
+        return gatewayApp.request(signedUrl, {
           method,
           headers,
           body,
-        });
-
-        return gatewayApp.request(gatewayRequest);
-      }
-
-      if (requestUrl.startsWith(CONTROL_PLANE_BASE)) {
-        const relative = requestUrl.replace(CONTROL_PLANE_BASE, '') || '/';
-        return controlPlaneApp.request(relative, {
-          method: init.method ?? 'GET',
-          headers: init.headers,
-          body: init.body,
         });
       }
 
@@ -201,15 +217,13 @@ describe('LangChain → StringCost Gateway', () => {
       apiKey: 'unused',
       model: 'gpt-4o-mini',
       configuration: {
-        baseURL: 'http://test/llm/v1',
+        baseURL: `${GATEWAY_BASE}/llm/v1`,
         fetch: fetchProxy as any,
       },
       clientOptions: {
         fetch: fetchProxy as any,
         defaultHeaders: {
-          Authorization: 'Bearer sk-stringcost-123',
-          'x-stringcost-run-id': runId,
-          'x-stringcost-user-id': 'user-langchain',
+          Authorization: 'Bearer sk-openai-real',
         },
       },
     });

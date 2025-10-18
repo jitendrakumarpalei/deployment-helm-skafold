@@ -19,7 +19,8 @@ This memo captures how the current StringCost codebase came together—from rece
 | Oct 16 | Diagnosed 502 by enabling debug logs; control plane returned nested configs. Normalised config shape (copy `provider` and `api_key` to top-level) and forwarded `virtual_key` header → tests green. |
 | Oct 16 | Renamed migrations to millisecond timestamps (e.g., `1735689600000_initial_schema.cjs`) so `node-pg-migrate` stops printing “Can't determine timestamp” warnings in CI. |
 | Oct 17 | Updated README with accurate curl examples, environment instructions, and observability notes. |
-| Oct 17 | This post-mortem drafted—documenting lessons, outstanding work, and recommended next steps. |
+| Oct 18 | Refactored runtime auth: introduced encrypted pre-signed URLs, dropped custom headers, added presign endpoint + shared AES/HMAC helpers. |
+| Oct 18 | This post-mortem drafted—documenting lessons, outstanding work, and recommended next steps. |
 
 ---
 
@@ -28,12 +29,13 @@ This memo captures how the current StringCost codebase came together—from rece
 ```
 Clients (LangChain / SDKs / curl)
         │
+        ├─ (1) POST /control/v1/presign → encrypted token / signed URL
+        │
         ▼
   apps/gateway (Hono)
-   ├─ Auth (StringCost API key)
-   ├─ Control plane config fetch (HTTP -> apps/control-plane)
-   ├─ Header normalisation (x-stringcost-* -> x-portkey-*)
-   └─ Direct call into vendor/portkey-gateway router
+   ├─ Validate signed token (method/path/expiry/body hash)
+   ├─ Inject Portkey headers (`x-portkey-provider`, config)
+   └─ Call vendored portkey router in-process (no secondary hop)
 
 Vendored Portkey Gateway
    ├─ Retry / routing / guardrails
@@ -67,9 +69,9 @@ Vendored Portkey Gateway
 
 ## 3. Testing & CI
 
-- **framework:** Vitest (v1.6.1) with Testcontainers for PostgreSQL.  
-- **critical test:** `tests/langchain/proxy.test.ts` spins up Postgres, runs migrations, seeds control-plane rows, then simulates a LangChain `ChatOpenAI` call from config fetch → gateway → event collector → worker classification; asserts ledger enrichment and queue drain.  
-- **other tests:** migration smoke tests, worker classification, event collector API, gateway wrapper header translation.
+- **framework:** Vitest (v1.6.1) with Testcontainers for PostgreSQL; supertest-based API suites run alongside unit tests.  
+- **critical test:** `tests/langchain/proxy.test.ts` exercises the presign flow → signed URL invocation → event collector → worker classification; asserts ledger enrichment and queue drain.  
+- **other tests:** migration smoke tests, worker classification, event collector API, gateway signed-token handling.
 - **CI adjustments:**  
   - GitHub Actions (`.github/workflows/ci.yml`) runs Postgres and Redis services but only Postgres is used.  
   - `TESTCONTAINERS_RYUK_DISABLED=true` to avoid docker-in-docker permission issues.  
@@ -128,41 +130,51 @@ Vendored Portkey Gateway
 
 | Path | Role / Highlights |
 |------|-------------------|
-| `apps/gateway/src/app.ts` | Header translation, control-plane fetch, config normalisation, in-process Portkey call. |
-| `apps/gateway/src/middleware/requestAdapter.ts` | Rewrites `/llm` prefix, maps `x-stringcost-*` headers. |
-| `apps/control-plane/src/server.ts` | Hono routes for `/healthz`, `/v1/account/config`, `/v2/models`. Includes debug logging. |
+| `apps/gateway/src/app.ts` | Validates signed tokens, injects Portkey headers, computes body hashes, forwards to vendored router. |
+| `apps/gateway/src/middleware/requestAdapter.ts` | Rewrites `/llm` prefix and strips signing query params before handing off. |
+| `apps/control-plane/src/server.ts` | Hono routes for `/healthz`, `/v1/presign`, `/v1/account/config`, `/v2/models`. Includes debug logging. |
 | `apps/control-plane/src/db.ts` | Connection pool singleton + `closePool()` (added for integration test cleanup). |
 | `apps/event-collector/src/server.ts` | Accepts events at `/` and `/events`, validates required fields, enqueues classification job. |
 | `apps/worker/src/worker.ts` | Implements `startWorker()`; leases rows from `classification_jobs` and updates ledger. |
 | `tests/langchain/proxy.test.ts` | End-to-end test covering control plane → gateway → event collector → worker. |
+| `tests/gateway/gateway.api.test.ts` | Supertest suite validating signed URL enforcement (skips automatically when sockets cannot be bound). |
 | `deploy/appengine/deploy.sh` | Builds, stages, and deploys all services with `--promote --stop-previous-version`; includes version pruning. |
 | `PORTKEY_TAG` | Homed commit of vendored Portkey gateway (`971c72a38cf0e0632f475365d71bda1020e4f66f`). |
 
 ---
 
-## 8. Quick Reference: Headers & Curl Calls
+## 8. Quick Reference: Presign & Invoke
 
-### Resolve Control Plane Config
-
-```bash
-curl https://api.stringcost.com/control/v1/account/config \
-  -H "Authorization: Bearer sk-stringcost-123"
-```
-
-### Call Gateway (OpenAI example)
+### Step 1 – get a one-use URL
 
 ```bash
-curl https://api.stringcost.com/llm/v1/chat/completions \
+curl -X POST https://api.stringcost.com/control/v1/presign \
   -H "Authorization: Bearer sk-stringcost-123" \
   -H "Content-Type: application/json" \
-  -H "x-stringcost-provider: openai" \
-  -H "x-stringcost-config: {\"virtual_key\":\"vk-openai-prod\"}" \
-  -H "x-stringcost-run-id: $(uuidgen)" \
-  -H "x-stringcost-user-id: customer-4242" \
-  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Say hi to the finance team"}]}'
+  -d '{
+        "provider": "openai",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "run_id": "$(uuidgen)",
+        "user_id": "customer-4242",
+        "metadata": {"environment": "prod"},
+        "config": {"virtual_key": "vk-openai-prod"}
+      }'
 ```
 
-### Log Supplemental Event
+### Step 2 – call the proxy with provider headers
+
+```bash
+curl "https://api.stringcost.com/llm/v1/chat/completions?token=eyes-only" \
+  -H "Authorization: Bearer sk-openai-real" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "model": "gpt-4o-mini",
+        "messages": [{"role":"user","content":"Say hi to the finance team"}]
+      }'
+```
+
+### Step 3 – optional explicit ledger event
 
 ```bash
 curl https://api.stringcost.com/events \

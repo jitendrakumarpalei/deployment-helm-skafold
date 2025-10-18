@@ -36,10 +36,14 @@ Copy `.env.example` (if present) or export variables manually. The minimum requi
 ```bash
 export DATABASE_URL="postgres://stringcost:stringcost@localhost:5432/stringcost?sslmode=disable"
 export CONTROL_PLANE_URL="http://127.0.0.1:8787/control"
-export ALBUS_BASEPATH="$CONTROL_PLANE_URL"          # used internally by Portkey
+export GATEWAY_BASE_URL="http://127.0.0.1:8787"
+export URL_TOKEN_KEY="$(openssl rand -base64 32)"
 export META_LLM_CLASSIFIER_ENDPOINT="http://127.0.0.1:8890/classify"
 export META_LLM_API_KEY="local-classifier"
 export WORKER_POLL_INTERVAL_MS="200"
+
+# Optional legacy variables (used when running the vendored Portkey UI/plugins)
+export ALBUS_BASEPATH="$CONTROL_PLANE_URL"
 ```
 
 ### Run Database Migrations
@@ -88,54 +92,53 @@ To run only the ledger integrations (LangChain proxy + worker + migrations):
 TESTCONTAINERS_RYUK_DISABLED=true npm run test:ledger
 ```
 
+Signed URL gateway API tests use `supertest` and require the ability to bind ephemeral ports. Set `ENABLE_SUPERTEST=true` before running `npm run test --workspace @stringcost/gateway` if your environment allows socket binds (GitHub Actions does by default).
+
 ## API Usage
 
-The public interface mirrors OpenAI’s REST API but requires StringCost headers. A typical flow:
+Runtime requests no longer require custom headers. Instead, clients obtain a **one-use signed URL** from the control plane and then call that URL with the same headers they would send to the upstream provider (e.g., OpenAI or Anthropic). The signed URL encodes provider selection, virtual keys, run/user IDs, and optional extras (retry rules, metadata, body hash, etc.).
 
-1. Call the control plane to resolve provider configuration (virtual key, metadata).
-2. Send your LLM request to `/llm/v1/...` with `Authorization` and `x-stringcost-*` headers.
-3. Optionally POST usage events to `/events` if you have out-of-band work to log.
+1. **Pre-sign** the target path using your StringCost API key (`Authorization: Bearer sk-stringcost-123`).
+2. **Invoke** the returned URL with your normal provider headers (`Authorization: Bearer sk-openai-...`).
+3. **(Optional)** Emit additional ledger events to `/events` for tool calls or custom steps.
 
-### 1. Resolve Provider Configuration
+### 1. Generate a signed URL
 
 ```bash
-curl https://api.stringcost.com/control/v1/account/config \
+curl -X POST https://api.stringcost.com/control/v1/presign \
   -H "Authorization: Bearer sk-stringcost-123" \
-  -H "Content-Type: application/json"
-
-# With provider filter:
-curl "https://api.stringcost.com/control/v1/account/config?provider=openai" \
-  -H "Authorization: Bearer sk-stringcost-123"
+  -H "Content-Type: application/json" \
+  -d '{
+        "provider": "openai",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "run_id": "6a9ab408-541f-40d3-af8a-5091c58cb89d",
+        "user_id": "customer-4242",
+        "metadata": {"tier": "gold"},
+        "config": {
+          "virtual_key": "vk-openai-prod",
+          "retry": {"attempts": 3, "on_status_codes": [429] }
+        },
+        "expires_in": 60
+      }'
 ```
 
 **Response**
 
 ```json
 {
-  "provider": "openai",
-  "config": {
-    "provider": "openai",
-    "virtual_key": "vk-openai-prod",
-    "config": {
-      "api_key": "sk-openai-real"
-    },
-    "metadata": { "tier": "enterprise" }
-  }
+  "url": "https://api.stringcost.com/llm/v1/chat/completions?token=eyes-only",
+  "token": "eyes-only",
+  "expires_at": 1736899200
 }
 ```
 
-Use the returned `provider` and `virtual_key` (or `config.api_key`) in the next request.
-
-### 2. Call the Gateway
+### 2. Call the gateway using the signed URL
 
 ```bash
-curl https://api.stringcost.com/llm/v1/chat/completions \
-  -H "Authorization: Bearer sk-stringcost-123" \
+curl "https://api.stringcost.com/llm/v1/chat/completions?token=eyes-only" \
+  -H "Authorization: Bearer sk-openai-real" \
   -H "Content-Type: application/json" \
-  -H "x-stringcost-provider: openai" \
-  -H "x-stringcost-config: {\"virtual_key\":\"vk-openai-prod\"}" \
-  -H "x-stringcost-run-id: 6a9ab408-541f-40d3-af8a-5091c58cb89d" \
-  -H "x-stringcost-user-id: customer-4242" \
   -d '{
         "model": "gpt-4o-mini",
         "messages": [
@@ -144,28 +147,7 @@ curl https://api.stringcost.com/llm/v1/chat/completions \
       }'
 ```
 
-Any OpenAI-compatible SDK can hit the same endpoints by pointing its `baseURL` to `https://api.stringcost.com/llm/v1`. Example with the official OpenAI JS SDK:
-
-```ts
-import OpenAI from 'openai';
-
-const client = new OpenAI({
-  apiKey: 'unused-when-virtual-key-present',
-  baseURL: 'https://api.stringcost.com/llm/v1',
-  defaultHeaders: {
-    Authorization: 'Bearer sk-stringcost-123',
-    'x-stringcost-provider': 'anthropic',
-    'x-stringcost-config': JSON.stringify({ virtual_key: 'vk-anthropic-prod' }),
-    'x-stringcost-run-id': crypto.randomUUID(),
-    'x-stringcost-user-id': 'workspace-17'
-  }
-});
-
-const completion = await client.chat.completions.create({
-  model: 'claude-3-sonnet-20240229',
-  messages: [{ role: 'user', content: 'Draft a SOC2 compliant password policy.' }]
-});
-```
+Any OpenAI-compatible SDK can implement this flow by calling `/control/v1/presign` per request and then forwarding the request to the returned URL. The `tests/langchain/proxy.test.ts` fixture demonstrates a LangChain adapter that does exactly this.
 
 ### 3. Log Explicit Events (Optional)
 
@@ -189,21 +171,21 @@ curl https://api.stringcost.com/events \
 
 The event collector inserts the record into `ledger_events` and enqueues the prompt for meta-classification. The worker updates `action_type` once the classifier responds.
 
-## Header Reference
+## Presign Request Fields
 
-| Header | Purpose |
+| Field | Purpose |
 | --- | --- |
-| `Authorization: Bearer <StringCost API key>` | Authenticates the workspace. Required for control plane + gateway. |
-| `x-stringcost-provider` | Provider name used by the wrapper and for control-plane lookups (e.g., `openai`, `anthropic`, `groq`). |
-| `x-stringcost-config` | JSON configuration mirroring Portkey’s config schema. Supply `virtual_key`, `targets`, `retry`, `guardrails`, etc. |
-| `x-stringcost-run-id` | UUID for the agent run; groups ledger rows. |
-| `x-stringcost-user-id` | Downstream customer/user identifier. |
-| `x-stringcost-metadata` | JSON string persisted with the ledger record. |
-| `x-stringcost-forward-headers` | Comma-separated list of headers to forward to the provider. |
-| `x-stringcost-request-timeout` | Upstream provider timeout in milliseconds. |
-| `x-stringcost-strict-openai-compliance` | `true` to coerce responses into the OpenAI schema for non-OpenAI providers. |
+| `provider` | Which stored credential to use (`openai`, `anthropic`, `groq`, …). Optional if you supply `virtual_key`. |
+| `virtual_key` | Explicit credential key to use (overrides `provider` default). |
+| `method` | HTTP verb to lock the signed URL to (`POST`, `GET`, …). Defaults to `POST`. |
+| `path` | Target path relative to `/llm` (e.g., `/v1/chat/completions`). |
+| `config` | Optional Portkey configuration overrides (targets, retry policy, guardrails, cache, etc.). The control plane injects the real `api_key` before sealing the token. |
+| `run_id`, `user_id` | Embedded into the token so ledger events and metrics map back to your agent/session. |
+| `metadata` | Arbitrary JSON persisted alongside the ledger entry. |
+| `body_sha256` | Optional hex digest to bind the token to an exact request payload. |
+| `expires_in` | Time-to-live for the URL in seconds (defaults to `60`, max `600`). |
 
-Internally the wrapper translates `x-stringcost-*` to the vendored `x-portkey-*` headers so no Portkey branding appears in the public surface area.
+The control plane encrypts the payload with AES-256-GCM using `URL_TOKEN_KEY`. The gateway decrypts it, validates method/path/expiry, injects internal `x-portkey-*` headers, and then hands the request to the vendored gateway.
 
 ## Operational Notes
 

@@ -1,12 +1,14 @@
 const WRAPPER_PREFIX = '/llm';
-const STRINGCOST_PREFIX = 'x-stringcost-';
-const PORTKEY_PREFIX = 'x-portkey-';
-
 const METHODS_WITHOUT_BODY = new Set(['GET', 'HEAD']);
+
+interface ForwardOptions {
+  stripQueryParams?: string[];
+}
 
 export async function createForwardRequest(
   original: Request,
-  overrideHeaders?: Headers
+  overrideHeaders?: Headers,
+  options: ForwardOptions = {}
 ): Promise<Request> {
   const clone = original.clone();
   const originalUrl = new URL(clone.url);
@@ -16,6 +18,11 @@ export async function createForwardRequest(
 
   const internalUrl = new URL(clone.url);
   internalUrl.pathname = internalPath;
+  if (options.stripQueryParams?.length) {
+    for (const param of options.stripQueryParams) {
+      internalUrl.searchParams.delete(param);
+    }
+  }
 
   const headers = overrideHeaders ? new Headers(overrideHeaders) : new Headers(clone.headers);
   const method = clone.method.toUpperCase();
@@ -32,12 +39,4 @@ export async function createForwardRequest(
   }
 
   return new Request(internalUrl.toString(), init);
-}
-
-export function enrichRequestHeaders(headers: Headers): void {
-  for (const [key, value] of Array.from(headers.entries())) {
-    if (key.startsWith(STRINGCOST_PREFIX)) {
-      headers.set(PORTKEY_PREFIX + key.slice(STRINGCOST_PREFIX.length), value);
-    }
-  }
 }

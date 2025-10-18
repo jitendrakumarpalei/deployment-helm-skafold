@@ -1,27 +1,32 @@
+import { Buffer } from 'node:buffer';
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
 import app from '../../apps/gateway/src/app';
 import portkeyApp from '../../vendor/portkey-gateway/src/index';
+import { sealSignedRequest } from '../../apps/shared/urlToken';
 
-const CONTROL_PLANE_URL = 'http://control.local';
-const originalFetch = global.fetch;
 let portkeyFetchSpy: ReturnType<typeof vi.spyOn> | undefined;
 let forwardedRequest: Request | undefined;
+const originalEnv = process.env.URL_TOKEN_KEY;
+const urlTokenKey = Buffer.alloc(32, 3).toString('base64');
 
 describe('StringCost Gateway Wrapper', () => {
   beforeEach(() => {
     forwardedRequest = undefined;
+    process.env.URL_TOKEN_KEY = urlTokenKey;
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
-    delete process.env.CONTROL_PLANE_URL;
+    if (originalEnv === undefined) {
+      delete process.env.URL_TOKEN_KEY;
+    } else {
+      process.env.URL_TOKEN_KEY = originalEnv;
+    }
     portkeyFetchSpy?.mockRestore();
     portkeyFetchSpy = undefined;
     vi.restoreAllMocks();
   });
 
-  it('translates headers and forwards requests via control plane resolution', async () => {
-    process.env.CONTROL_PLANE_URL = CONTROL_PLANE_URL;
+  it('validates signed token and forwards requests to Portkey', async () => {
     portkeyFetchSpy = vi
       .spyOn(portkeyApp, 'fetch')
       .mockImplementation(async (request) => {
@@ -46,47 +51,24 @@ describe('StringCost Gateway Wrapper', () => {
         );
       });
 
-    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.url;
+    const payload = {
+      v: 1,
+      client_id: 'client-1',
+      provider: 'openai',
+      route_config: { provider: 'openai', api_key: 'sk-openai-real' },
+      virtual_key: 'vk-openai-demo',
+      method: 'POST',
+      path: '/v1/chat/completions',
+      run_id: 'run-123',
+      user_id: 'user-456',
+      metadata: { tier: 'gold' },
+      issued_at: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 60,
+      nonce: 'nonce-1'
+    };
+    const token = sealSignedRequest(payload);
 
-      if (url.startsWith(CONTROL_PLANE_URL)) {
-        return new Response(
-          JSON.stringify({
-            provider: 'openai',
-            config: {
-              provider: 'openai',
-              virtual_key: 'vk-openai-demo',
-              config: { api_key: 'sk-openai-real' }
-            }
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } }
-        );
-      }
-
-      // Upstream provider response
-      return new Response(
-        JSON.stringify({
-          choices: [
-            {
-              index: 0,
-              finish_reason: 'stop',
-              message: { role: 'assistant', content: 'wrapper-ok' }
-            }
-          ]
-        }),
-        {
-          status: 200,
-          headers: {
-            'content-type': 'application/json',
-            'x-portkey-request-id': 'abc123'
-          }
-        }
-      );
-    });
-
-    global.fetch = fetchSpy as unknown as typeof global.fetch;
-
-    const response = await app.request('http://test/llm/v1/chat/completions', {
+    const response = await app.request(`http://test/llm${payload.path}?token=${token}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -98,23 +80,19 @@ describe('StringCost Gateway Wrapper', () => {
       })
     });
 
-    const body = await response.json();
-
-    expect(response.status).not.toBe(502);
-    if (response.status === 200) {
-      expect(body.choices?.[0]?.message?.content).toBe('wrapper-ok');
-    }
-    expect(fetchSpy).toHaveBeenCalled();
+    expect(response.status).toBe(200);
 
     expect(forwardedRequest).toBeDefined();
-    if (forwardedRequest) {
-      expect(forwardedRequest.headers.get('x-portkey-provider')).toBe('openai');
-      expect(forwardedRequest.headers.get('authorization')).toBe('Bearer stringcost-test-key');
-      expect(forwardedRequest.headers.get('x-portkey-config')).toBeTruthy();
-    }
+    const forwarded = forwardedRequest!;
+    const forwardedUrl = new URL(forwarded.url);
+    expect(forwardedUrl.searchParams.get('token')).toBeNull();
+    expect(forwarded.headers.get('x-portkey-provider')).toBe('openai');
+    expect(forwarded.headers.get('authorization')).toBe('Bearer stringcost-test-key');
+    expect(forwarded.headers.get('x-portkey-config')).toBeTruthy();
+    expect(forwarded.headers.get('x-stringcost-run-id')).toBe('run-123');
   });
 
-  it('returns an informative error when no provider configuration is available', async () => {
+  it('returns an informative error when no token is provided', async () => {
     const response = await app.request('http://test/llm/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -125,7 +103,7 @@ describe('StringCost Gateway Wrapper', () => {
 
     const body = await response.json();
 
-    expect(response.status).toBe(502);
-    expect(body.message).toMatch(/provider configuration/i);
+    expect(response.status).toBe(400);
+    expect(body.message).toMatch(/token/i);
   });
 });
