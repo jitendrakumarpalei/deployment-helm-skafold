@@ -1,252 +1,231 @@
-# StringCost Gateway Usage Guide
+# StringCost Gateway & Billing Stack
 
-The StringCost gateway is a self-hosted build of Portkey's OpenAI-compatible proxy. It lets you point existing OpenAI clients (LangChain, the OpenAI SDK, cURL, etc.) at a single base URL while routing requests to any supported provider (OpenAI, Anthropic, Bedrock, Groq, …) simply by adjusting HTTP headers. This document explains exactly which headers we accept, how they map to Portkey’s configuration options, and how to construct them when you call the gateway.
+This repository vendors the [Portkey](https://github.com/Portkey-AI/gateway) gateway and wraps it with the StringCost control plane, event collector, and billing ledger. The wrapper keeps Portkey unmodified while exposing brand-neutral APIs (`/llm/*`, `/control/*`, `/events/*`) and feeding usage data into our double-entry ledger.
 
-- Gateway base URL: `https://api.stringcost.com/llm/v1`
-- Health endpoint: `GET https://api.stringcost.com/healthz`
-- All v1 endpoints exposed: `/chat/completions`, `/completions`, `/embeddings`, `/responses`, `/images/*`, `/audio/*`, `/files/*`, `/batches/*`, `/models`, `/realtime`.
+- **Gateway** (`apps/gateway`) – Hono app that authenticates requests, fetches provider configuration from the control plane, normalises it into the Portkey format, then calls the vendored gateway in-process. All public endpoints live under `/llm/v1/*`.
+- **Control Plane** (`apps/control-plane`) – Issues API keys, stores provider credentials/virtual keys, and advertises the model catalogue. Exposed under `/control/v1` and `/control/v2`.
+- **Event Collector** (`apps/event-collector`) – Writes raw ledger events to Postgres and enqueues classification jobs in an `UNLOGGED` table (`classification_jobs`).
+- **Worker** (`apps/worker`) – Background process that drains `classification_jobs`, calls the meta classifier, and updates `ledger_events`.
+- **Vendored Portkey** (`vendor/portkey-gateway`) – Clean checkout of the upstream gateway. We keep the git metadata out of tree and pin the commit in `PORTKEY_TAG`.
 
-All headers are brand-neutral (`x-stringcost-*`). The wrapper translates them into the underlying Portkey headers before requests reach the vendored gateway.
+> **Base URLs (production)**  
+> Gateway: `https://api.stringcost.com/llm`  
+> Control plane: `https://api.stringcost.com/control`  
+> Event collector: `https://api.stringcost.com/events`
 
-## Architecture at a Glance
+## Quick Start
 
-- `apps/gateway`: Brand wrapper that authenticates clients, resolves provider configs, and then hands the request to the vendored Portkey router (imported from `vendor/portkey-gateway`) in-process—no double hop.
-- `apps/control-plane`: Internal API that serves `/v1/account/config` and `/v2/models` so the gateway can hydrate provider credentials and catalog data without exposing Portkey branding.
-- `apps/event-collector`: Receives raw usage events, persists them to the ledger, and enqueues classification jobs in a PostgreSQL `classification_jobs` cache table.
-- `apps/worker`: Background worker that drains the classification queue, calls the meta classifier, and updates the ledger.
-- `vendor/portkey-gateway`: Clean checkout of https://github.com/Portkey-AI/gateway (Git metadata removed). We track the upstream commit in `PORTKEY_TAG`.
+### Prerequisites
 
-Environment variables:
+- Node.js 20+
+- Docker (used by tests via Testcontainers)
+- PostgreSQL 16 (local or remote)
 
-| Variable | Service | Purpose |
-| --- | --- | --- |
-| `CONTROL_PLANE_URL` | gateway | Base URL the wrapper calls to resolve provider configs before hitting Portkey |
-| `ALBUS_BASEPATH` | vendored gateway | Mirrors `CONTROL_PLANE_URL` for Portkey’s internal control-plane hooks |
-| `DATABASE_URL` | control-plane, ledger, event-collector, worker | PostgreSQL connection string |
-| `META_LLM_CLASSIFIER_ENDPOINT`, `META_LLM_API_KEY` | worker | HTTP endpoint + key used by the classifier |
-| `WORKER_POLL_INTERVAL_MS`, `WORKER_BATCH_SIZE` | worker | Optional tuning for queue polling |
-
-Run migrations via the provided helpers:
+Clone dependencies and install packages:
 
 ```bash
-# Ledger schema (billing tables, ledger events, invoices)
-node --loader ts-node/esm apps/ledger/src/cli.ts migrate
+git clone https://github.com/stringcost/stringcost.git
+cd stringcost
+npm install --no-audit --no-fund
+```
 
-# Control plane schema (API keys, provider credentials, model catalog)
+### Environment
+
+Copy `.env.example` (if present) or export variables manually. The minimum required set:
+
+```bash
+export DATABASE_URL="postgres://stringcost:stringcost@localhost:5432/stringcost?sslmode=disable"
+export CONTROL_PLANE_URL="http://127.0.0.1:8787/control"
+export ALBUS_BASEPATH="$CONTROL_PLANE_URL"          # used internally by Portkey
+export META_LLM_CLASSIFIER_ENDPOINT="http://127.0.0.1:8890/classify"
+export META_LLM_API_KEY="local-classifier"
+export WORKER_POLL_INTERVAL_MS="200"
+```
+
+### Run Database Migrations
+
+```
+# Ledger (billing, events, invoices)
+npm run migrate --workspace @stringcost/ledger
+
+# Control plane (clients, provider credentials, model catalogue)
 node --loader ts-node/esm apps/control-plane/src/migrate.ts
 ```
 
-Both migration scripts default to `DATABASE_URL`; pass `--database-url=...` to override.
+Migrations default to `DATABASE_URL`. To use a different connection string, pass `--database-url=...`.
 
-## Required Authentication Headers
+### Start the Services Locally
 
-| Header | Purpose | Example |
-| --- | --- | --- |
-| `Authorization: Bearer <STRINGCOST_API_KEY>` | Authenticates your organization/workspace against StringCost. You obtain this key from StringCost billing. | `Authorization: Bearer sk-stringcost-123` |
-| `x-stringcost-provider` | Provider to route the call to (`openai`, `anthropic`, `groq`, `bedrock`, etc.). Required unless the config object (see below) includes a provider or targets array. | `x-stringcost-provider: anthropic` |
-| `x-stringcost-config` | JSON-encoded routing configuration identical to Portkey’s `config` option. Use this to supply virtual keys, retry logic, guardrails, dynamic targets, etc. | `x-stringcost-config: {"provider":"openai","virtual_key":"vk-openai-abc"}` |
+Each service is a small Hono app with a `dev` script:
 
-You must send **either** `x-stringcost-provider` **or** a `provider`/`targets` field inside `x-stringcost-config`. Most clients send both for clarity.
+```bash
+# Terminal 1 – gateway wrapper (+ vendored Portkey)
+npm run dev --workspace @stringcost/gateway
 
-## Optional Observability / Billing Headers
+# Terminal 2 – control plane API
+npm run dev --workspace @stringcost/control-plane
 
-| Header | Purpose |
-| --- | --- |
-| `x-stringcost-run-id` | UUID for the agent run. Helps double-entry ledger grouping and metadata joins. If omitted we auto-generate a run id. |
-| `x-stringcost-user-id` | Your internal user/customer identifier. Propagates into ledger events. |
-| `x-stringcost-metadata` | JSON string with arbitrary metadata (category, funnel, etc.). Stored verbatim in the ledger. |
-| `x-stringcost-custom-host` | Overrides host for provider calls (advanced escape hatch). Validated to avoid pointing back at StringCost/Portkey. |
-| `x-stringcost-forward-headers` | Comma-separated list of headers we should pass through to the provider (for example custom telemetry, SSO tokens). |
-| `x-stringcost-request-timeout` | Timeout in milliseconds for the upstream provider call. |
-| `x-stringcost-strict-openai-compliance` | If set to `true`, enforces OpenAI request/response shapes even when routing to non-OpenAI providers. |
+# Terminal 3 – event collector
+npm run dev --workspace @stringcost/event-collector
 
-## Configuration (`x-stringcost-config`) Cheatsheet
+# Terminal 4 – classification worker
+npm run dev --workspace @stringcost/worker
+```
 
-The body of `x-stringcost-config` mirrors Portkey’s [config schema](https://portkey.ai/docs). Common fields include:
+By default the gateway listens on `http://127.0.0.1:8787`. Adjust `CONTROL_PLANE_URL`/`ALBUS_BASEPATH` if you bind the control-plane to another port.
+
+### Run the Test Suite
+
+Vitest relies on Testcontainers to spin up PostgreSQL automatically. Disable Ryuk in CI/WSL environments:
+
+```bash
+TESTCONTAINERS_RYUK_DISABLED=true npm test
+```
+
+To run only the ledger integrations (LangChain proxy + worker + migrations):
+
+```bash
+TESTCONTAINERS_RYUK_DISABLED=true npm run test:ledger
+```
+
+## API Usage
+
+The public interface mirrors OpenAI’s REST API but requires StringCost headers. A typical flow:
+
+1. Call the control plane to resolve provider configuration (virtual key, metadata).
+2. Send your LLM request to `/llm/v1/...` with `Authorization` and `x-stringcost-*` headers.
+3. Optionally POST usage events to `/events` if you have out-of-band work to log.
+
+### 1. Resolve Provider Configuration
+
+```bash
+curl https://api.stringcost.com/control/v1/account/config \
+  -H "Authorization: Bearer sk-stringcost-123" \
+  -H "Content-Type: application/json"
+
+# With provider filter:
+curl "https://api.stringcost.com/control/v1/account/config?provider=openai" \
+  -H "Authorization: Bearer sk-stringcost-123"
+```
+
+**Response**
 
 ```json
 {
-  "provider": "anthropic",          // or omit and use targets
-  "virtual_key": "vk-anthropic-123", // maps to your stored provider credential
-  "retry": {
-    "attempts": 3,
-    "on_status_codes": [429, 500]
-  },
-  "targets": [                       // optional multi-provider routing
-    {
-      "provider": "anthropic",
-      "weight": 1,
-      "config": { "virtual_key": "vk-anthropic-123" }
-    }
-  ],
-  "guardrails": {
-    "default.contains": {
-      "operator": "none",
-      "words": ["classified", "internal"]
-    }
-  },
-  "forward_headers": ["x-user-tier"],
-  "metadata": { "experiment": "A/B-42" }
+  "provider": "openai",
+  "config": {
+    "provider": "openai",
+    "virtual_key": "vk-openai-prod",
+    "config": {
+      "api_key": "sk-openai-real"
+    },
+    "metadata": { "tier": "enterprise" }
+  }
 }
 ```
 
-You can generate the header string with your language's JSON utilities or reuse Portkey's helper functions (`createHeaders`) as shown below.
+Use the returned `provider` and `virtual_key` (or `config.api_key`) in the next request.
 
-## Example: LangChain (Python)
-
-```python
-from langchain_openai import ChatOpenAI
-from portkey_ai import createHeaders, PORTKEY_GATEWAY_URL
-
-STRINGCOST_API_KEY = "sk-stringcost-123"
-VIRTUAL_KEY = "vk-anthropic-demo"  # stored in StringCost/Portkey portal
-
-headers = createHeaders(
-    api_key=STRINGCOST_API_KEY,
-    virtual_key=VIRTUAL_KEY,
-    provider="anthropic",
-    metadata={"team": "support-bot"}
-)
-# Add run/user ids for ledger transparency
-headers["x-stringcost-run-id"] = "d1b8ad8e-8e6d-4f4a-9acd-221c786f869b"
-headers["x-stringcost-user-id"] = "user-42"
-
-llm = ChatOpenAI(
-    api_key="unused-when-virtual-key-present",
-    base_url=f"{PORTKEY_GATEWAY_URL}/llm/v1",
-    default_headers=headers,
-    model="claude-3-opus-20240229"
-)
-
-resp = llm.invoke("Summarize our escalation policy in 3 bullet points")
-print(resp.content)
-```
-
-Replacing `provider` and `virtual_key` switches providers: set `provider="openai"` and virtual key for OpenAI, or specify a `targets` array for fan-out routing.
-
-## Example: LangChain (JavaScript)
-
-```ts
-import { ChatOpenAI } from '@langchain/openai';
-
-const headers = {
-  Authorization: 'Bearer sk-stringcost-123',
-  'x-stringcost-provider': 'openai',
-  'x-stringcost-config': JSON.stringify({
-    virtual_key: 'vk-openai-main',
-    retry: { attempts: 5, on_status_codes: [429] },
-  }),
-  'x-stringcost-run-id': crypto.randomUUID(),
-  'x-stringcost-user-id': 'workspace-17',
-};
-
-const llm = new ChatOpenAI({
-  apiKey: 'unused',
-  model: 'gpt-4o-mini',
-  configuration: {
-    baseURL: 'https://api.stringcost.com/llm/v1',
-  },
-  clientOptions: {
-    fetch: async (input, init = {}) => {
-      const mergedHeaders = new Headers(init.headers || {});
-      Object.entries(headers).forEach(([k, v]) => mergedHeaders.set(k, v));
-      return fetch(input, { ...init, headers: mergedHeaders });
-    },
-  },
-});
-
-const answer = await llm.invoke('Give me three coffee bean origins with tasting notes.');
-console.log(answer.content);
-```
-
-## Example: Raw REST call with `curl`
+### 2. Call the Gateway
 
 ```bash
 curl https://api.stringcost.com/llm/v1/chat/completions \
   -H "Authorization: Bearer sk-stringcost-123" \
   -H "Content-Type: application/json" \
-  -H "x-stringcost-provider: anthropic" \
-  -H "x-stringcost-config: {\"virtual_key\":\"vk-anthropic-prod\"}" \
-  -H "x-stringcost-run-id: $(uuidgen)" \
+  -H "x-stringcost-provider: openai" \
+  -H "x-stringcost-config: {\"virtual_key\":\"vk-openai-prod\"}" \
+  -H "x-stringcost-run-id: 6a9ab408-541f-40d3-af8a-5091c58cb89d" \
+  -H "x-stringcost-user-id: customer-4242" \
   -d '{
-        "model": "claude-3-haiku-20240307",
+        "model": "gpt-4o-mini",
         "messages": [
-          { "role": "user", "content": "Suggest a playful out-of-office message." }
+          { "role": "user", "content": "Summarise the Q3 release plan in 5 bullet points." }
         ]
       }'
 ```
 
-## Virtual Keys
+Any OpenAI-compatible SDK can hit the same endpoints by pointing its `baseURL` to `https://api.stringcost.com/llm/v1`. Example with the official OpenAI JS SDK:
 
-A virtual key is a pointer to the upstream provider credential you registered in the StringCost (Portkey) dashboard. You can:
+```ts
+import OpenAI from 'openai';
 
-1. Add provider secrets (OpenAI, Anthropic, AWS Bedrock, etc.) in the portal. Each secret receives a `virtual_key` string.
-2. Pass that virtual key in `x-stringcost-config` so the gateway injects the underlying API key when calling the provider. This is why the `apiKey` parameter on SDK clients is often ignored (`virtual_key` takes precedence).
-3. Rotate and scope access centrally without changing client code.
+const client = new OpenAI({
+  apiKey: 'unused-when-virtual-key-present',
+  baseURL: 'https://api.stringcost.com/llm/v1',
+  defaultHeaders: {
+    Authorization: 'Bearer sk-stringcost-123',
+    'x-stringcost-provider': 'anthropic',
+    'x-stringcost-config': JSON.stringify({ virtual_key: 'vk-anthropic-prod' }),
+    'x-stringcost-run-id': crypto.randomUUID(),
+    'x-stringcost-user-id': 'workspace-17'
+  }
+});
 
-## Advanced Routing
-
-- **Multiple targets**: Provide a `targets` array with weights to load-balance across providers or models.
-- **Fallbacks**: Include a `fallbacks` array inside the config to retry a second provider/model when the primary fails.
-- **Guardrails**: Use `guardrails`, `input_guardrails`, and `output_guardrails` blocks to apply modular checks (the names match Portkey plugins such as `default.contains`, `portkey.moderateContent`, etc.).
-- **Retry Budget**: Use the `retry` object to control attempts, backoff (`interval`, `exponent`), and status codes that should trigger a retry.
-- **Forwarding headers**: `x-stringcost-forward-headers: x-user-tier,x-session-id` tells the gateway which original headers to pass through when it calls the provider.
-
-## Observability & Billing
-
-Every request routed through the gateway produces a ledger entry (`ledger_events`) and enqueues the prompt for asynchronous classification. Provide meaningful `x-stringcost-run-id`, `x-stringcost-user-id`, and (optionally) `metadata` so invoices and analytics remain attributable. The worker consumes classification jobs from the PostgreSQL cache and updates each event’s `action_type` (e.g., `chat_completion`, `tool_selection`, `synthesis`). The cache uses an UNLOGGED table (`classification_jobs`) with automatic cleanup: leases expire after a configurable timeout and the worker trims rows older than the configured retention window on every batch.
-
-## Quick Checklist
-
-1. **Pick a provider or targets** and ensure a virtual key exists in the StringCost portal.
-2. **Construct headers**:
-   - `Authorization: Bearer <STRINGCOST_API_KEY>`
-   - `x-stringcost-provider` or `x-stringcost-config` with `provider`/`targets` and `virtual_key`.
-   - Optional observability headers (`run-id`, `user-id`, metadata).
-3. **Point your client** to `https://api.stringcost.com/llm/v1` (for local testing you can hit `http://localhost:<port>/llm/v1`).
-4. **Send requests normally**—the gateway rewrites headers, injects credentials, and forwards to the chosen provider.
-5. **Inspect ledgers and classifications** via the StringCost billing tools to verify double-entry updates.
-
-For additional configuration knobs (guardrails, conditional routing, streaming, Realtime) refer to Portkey’s configuration docs—the same payloads work here, only the header prefix changes to `x-stringcost-*`.
-
-## Render / PM2 Deployment
-
-`deploy/` contains assets for running every service on a single Render.com instance.
-
-- **Build command:** `npm run deploy:build`
-- **Start command:** `npm run deploy:start`
-
-`deploy/ecosystem.config.cjs` configures PM2 Runtime to launch the control plane, gateway, event collector, and worker together. See `deploy/README.md` for required environment variables and local dry-run tips.
-
-## Google App Engine Deployment
-
-`deploy/appengine/` now contains templates for App Engine Standard. Copy `deploy/appengine/service-account.json.example` to `service-account.json` (or point `SERVICE_ACCOUNT_JSON` at your key) **and** copy `deploy/appengine/.env.example` to `deploy/appengine/.env`. Fill in your Cloud SQL socket URL, classifier settings, and (optionally) a Serverless VPC connector if you need private networking. Once the files are populated you can run:
-
-```bash
-gcloud config set project stringcost
-npm run gae:deploy
+const completion = await client.chat.completions.create({
+  model: 'claude-3-sonnet-20240229',
+  messages: [{ role: 'user', content: 'Draft a SOC2 compliant password policy.' }]
+});
 ```
 
-Run `npm run gae:clean` afterwards if you want to remove the compiled artifacts (`apps/*/dist`, `vendor/portkey-gateway/build`, and the staged `app.yaml`). Review `deploy/appengine/README.md` for environment variables and deployment details.
+### 3. Log Explicit Events (Optional)
 
-## Local Development & Tests
+The gateway already writes a raw event and enqueues a classification job for every request. If your agent performs additional work (tool executions, external API calls) you can log them explicitly:
 
-Install dependencies with `npm install --no-audit --no-fund`.
+```bash
+curl https://api.stringcost.com/events \
+  -H "Content-Type: application/json" \
+  -d '{
+        "run_id": "6a9ab408-541f-40d3-af8a-5091c58cb89d",
+        "user_id": "customer-4242",
+        "step_name": "fetch-weather",
+        "action_type": "tool_selection",
+        "outcome": "success",
+        "duration_ms": 830,
+        "cost_cogs_micros": 110,
+        "revenue_billed_micros": 1450,
+        "prompt_content": "Weather API call payload..."
+      }'
+```
 
-The test suite spans multiple workspaces:
+The event collector inserts the record into `ledger_events` and enqueues the prompt for meta-classification. The worker updates `action_type` once the classifier responds.
 
-- `npm run test --workspace @stringcost/gateway` exercises the wrapper unit tests, including control-plane resolution (`tests/gateway/wrapper.test.ts`).
-- `npm run test --workspace @stringcost/ledger` drives Postgres-backed scenarios (`tests/langchain/proxy.test.ts`, `tests/ledger/*.test.ts`). These rely on **Testcontainers**; ensure a database-capable container runtime (Docker or compatible) is available locally or in CI.
-- `npm run test --workspace @stringcost/event-collector` and `npm run test --workspace @stringcost/worker` cover API and queue plumbing.
+## Header Reference
 
-CI (GitHub Actions) provisions PostgreSQL for the integration tests. When running locally without Docker, export `TEST_DATABASE_URL` to point at an existing instance; otherwise the tests will fail while trying to launch containers.
+| Header | Purpose |
+| --- | --- |
+| `Authorization: Bearer <StringCost API key>` | Authenticates the workspace. Required for control plane + gateway. |
+| `x-stringcost-provider` | Provider name used by the wrapper and for control-plane lookups (e.g., `openai`, `anthropic`, `groq`). |
+| `x-stringcost-config` | JSON configuration mirroring Portkey’s config schema. Supply `virtual_key`, `targets`, `retry`, `guardrails`, etc. |
+| `x-stringcost-run-id` | UUID for the agent run; groups ledger rows. |
+| `x-stringcost-user-id` | Downstream customer/user identifier. |
+| `x-stringcost-metadata` | JSON string persisted with the ledger record. |
+| `x-stringcost-forward-headers` | Comma-separated list of headers to forward to the provider. |
+| `x-stringcost-request-timeout` | Upstream provider timeout in milliseconds. |
+| `x-stringcost-strict-openai-compliance` | `true` to coerce responses into the OpenAI schema for non-OpenAI providers. |
 
-## Control Plane API Contract
+Internally the wrapper translates `x-stringcost-*` to the vendored `x-portkey-*` headers so no Portkey branding appears in the public surface area.
 
-The gateway wrapper calls these StringCost-branded endpoints (served by `apps/control-plane`):
+## Operational Notes
 
-- `GET /healthz` – liveness check.
-- `GET /v1/account/config?provider=openai` – returns `{ provider, config }`, where `config` matches Portkey’s expected structure (`provider`, `virtual_key`, `config.api_key`, optional metadata).
-- `GET /v2/models` – returns the model catalog filtered to the caller’s API key and provider credentials. Responses mimic OpenAI’s `List Models` shape with the addition of `provider` and `virtual_key`.
+- **PostgreSQL cache for classification** – We use an `UNLOGGED` table to avoid Redis; jobs are lightweight and truncated automatically if the database restarts.
+- **Portkey updates** – To bump the vendored gateway, replace `vendor/portkey-gateway` with a fresh checkout and update `PORTKEY_TAG`.
+- **Google App Engine deployment** – `deploy/appengine/deploy.sh` renders per-service YAML, stages dist builds, and deploys with `--promote`. Set `TESTCONTAINERS_RYUK_DISABLED=true` in CI to keep tests green.
+- **Troubleshooting** – Enable verbose logging by exporting `DEBUG_GATEWAY_CONFIG=1`, `DEBUG_GATEWAY_FORWARD=1`, or `DEBUG_CONTROL_PLANE=1` before starting the services.
 
-Clients authenticate with `Authorization: Bearer <STRINGCOST_API_KEY>` or `x-stringcost-api-key`. The gateway surfaces the same API key that clients present on the public `/llm/v1/*` routes, keeping the control plane invisible to end users.
+## Useful Commands
+
+```bash
+# Build all packages
+npm run build
+
+# Run only gateway tests
+npm run test --workspace @stringcost/gateway
+
+# Lint Portkey schema (vendored tests are skipped by default)
+npm run test --workspace @portkey-ai/gateway
+
+# Clean staged App Engine artifacts
+npm run gae:clean
+```
+
+When adding new migrations, follow the millisecond timestamp naming pattern (e.g., `1738368000000_new_feature.cjs`) so `node-pg-migrate` recognises file order without logging warnings.
