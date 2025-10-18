@@ -36,7 +36,7 @@ jobs:
       TEST_REDIS_URL: redis://127.0.0.1:6379
       DOCKER_HOST: unix:///var/run/docker.sock
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /var/run/docker.sock
-      TESTCONTAINERS_RYUK_DISABLED: false
+      TESTCONTAINERS_RYUK_DISABLED: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
