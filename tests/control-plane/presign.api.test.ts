@@ -1,19 +1,21 @@
 import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
+import { createAdaptorServer } from '@hono/node-server';
 import { Pool } from 'pg';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import controlPlaneApp from '../../apps/control-plane/src/server';
 import { runMigrations as runControlPlaneMigrations } from '../../apps/control-plane/src/migrate';
 import { runMigrations as runLedgerMigrations } from '../../apps/ledger/src/migrate';
 
-const CONTROL_BASE = 'http://127.0.0.1:8788';
-const GATEWAY_BASE = 'http://127.0.0.1:8787';
+const canListen = process.env.CI === 'true' || process.env.ENABLE_SUPERTEST === 'true';
+const describeSuite = canListen ? describe : describe.skip;
 
 let pgContainer: PostgreSqlContainer | undefined;
 let pool: Pool | undefined;
 let databaseUrl: string;
 let skipTest = false;
 let skipReason: string | undefined;
+let server: ReturnType<typeof createAdaptorServer> | undefined;
 
 process.env.URL_TOKEN_KEY = Buffer.alloc(32, 21).toString('base64');
 
@@ -63,6 +65,10 @@ beforeAll(async () => {
     if (pool) {
       await seedControlPlane(pool);
     }
+    if (canListen) {
+      server = createAdaptorServer({ fetch: controlPlaneApp.fetch });
+      server.listen(0);
+    }
   } catch (error) {
     skipTest = true;
     skipReason = (error as Error).message;
@@ -76,15 +82,22 @@ afterAll(async () => {
   if (pgContainer) {
     await pgContainer.stop();
   }
+  if (server) {
+    server.close();
+  }
 });
 
-describe('Control plane presign API', () => {
+describeSuite('Control plane presign API', () => {
   it('issues a signed URL for chat completions', async () => {
     if (skipTest) {
       return;
     }
-    const response = await request(controlPlaneApp)
-      .post('/v1/presign')
+    if (!server) {
+      server = createAdaptorServer({ fetch: controlPlaneApp.fetch });
+      server.listen(0);
+    }
+    const response = await request(server!)
+      .post('/control/v1/presign')
       .set('Authorization', 'Bearer sk-stringcost-123')
       .send({
         provider: 'openai',

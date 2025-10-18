@@ -70,7 +70,7 @@ describeSuite('Gateway signed URL handling', () => {
     const token = sealSignedRequest(payload);
 
     const response = await request(server!)
-      .post('/v1/chat/completions')
+      .post('/llm/v1/chat/completions')
       .query({ token })
       .send({
         model: 'gpt-4o-mini',
@@ -85,7 +85,7 @@ describeSuite('Gateway signed URL handling', () => {
 
   it('rejects when token is missing', async () => {
     const response = await request(server!)
-      .post('/v1/chat/completions')
+      .post('/llm/v1/chat/completions')
       .send({ model: 'gpt-4o-mini', messages: [] });
 
     expect(response.status).toBe(400);
@@ -109,7 +109,7 @@ describeSuite('Gateway signed URL handling', () => {
     const token = sealSignedRequest(payload);
 
     const response = await request(server!)
-      .post('/v1/chat/completions')
+      .post('/llm/v1/chat/completions')
       .query({ token })
       .set('Content-Type', 'application/json')
       .send(body);

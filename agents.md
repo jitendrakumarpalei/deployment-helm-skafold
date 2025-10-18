@@ -138,6 +138,7 @@ Vendored Portkey Gateway
 | `apps/event-collector/src/server.ts` | Accepts events at `/` and `/events`, validates required fields, enqueues classification job. |
 | `apps/worker/src/worker.ts` | Implements `startWorker()`; leases rows from `classification_jobs` and updates ledger. |
 | `tests/langchain/proxy.test.ts` | End-to-end test covering control plane → gateway → event collector → worker. |
+| `tests/control-plane/presign.api.test.ts` | Supertest smoke for `/v1/presign`, gated by `ENABLE_SUPERTEST`. |
 | `tests/gateway/gateway.api.test.ts` | Supertest suite validating signed URL enforcement (skips automatically when sockets cannot be bound). |
 | `deploy/appengine/deploy.sh` | Builds, stages, and deploys all services with `--promote --stop-previous-version`; includes version pruning. |
 | `PORTKEY_TAG` | Homed commit of vendored Portkey gateway (`971c72a38cf0e0632f475365d71bda1020e4f66f`). |
