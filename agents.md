@@ -17,7 +17,7 @@ This memo captures how the current StringCost codebase came together—from rece
 | Oct 14 | Deployed to GAE (gateway, control-plane, event-collector, worker). Fought with handler ordering & `/healthz` routes; the fix was mounting routers on both the root path and prefixed paths (e.g., `/control`). |
 | Oct 15 | Introduced Postgres-only cache: removed Redis references, replaced queue with `classification_jobs` table + worker lease logic. Tests red due to gateway returning 502 (control plane config missing API key). |
 | Oct 16 | Diagnosed 502 by enabling debug logs; control plane returned nested configs. Normalised config shape (copy `provider` and `api_key` to top-level) and forwarded `virtual_key` header → tests green. |
-| Oct 16 | Renamed migrations to millisecond timestamps (e.g., `1735689600000_initial_schema.cjs`) so `node-pg-migrate` stops printing “Can't determine timestamp” warnings in CI. |
+| Oct 16 | Standardised migration filenames and later moved the stack to Knex-based migrations/seeds to eliminate `node-pg-migrate` timestamp warnings. |
 | Oct 17 | Updated README with accurate curl examples, environment instructions, and observability notes. |
 | Oct 18 | Refactored runtime auth: introduced encrypted pre-signed URLs, dropped custom headers, added presign endpoint + shared AES/HMAC helpers. |
 | Oct 18 | Replaced encrypted blob tokens with canonical HMAC-signed URLs (kid/session/nonce) + optional body hash and encrypted config payload. Added replay store integration. |
@@ -73,12 +73,13 @@ Vendored Portkey Gateway
 
 - **framework:** Vitest (v1.6.1) with Testcontainers for PostgreSQL; optional supertest API suites run when `ENABLE_SUPERTEST=true`.  
 - **critical test:** `tests/langchain/proxy.test.ts` exercises the presign flow → signed URL invocation → event collector → worker classification; asserts ledger enrichment and queue drain.  
-- **other tests:** migration smoke tests, worker classification, event collector API, gateway signed-token handling. Gateway API suite (`tests/gateway/gateway.api.test.ts`) is skipped automatically when sockets cannot be bound.
+- **other tests:** migration smoke tests, worker classification, event collector API, gateway signed-token handling. Gateway API suite (`tests/gateway/gateway.api.test.ts`) is skipped automatically when sockets cannot be bound.  
+- **migrations:** CI runs `npm run db:migrate` and `npm run db:seed` (demo workspace, provider creds, ledger sample data) before executing tests.
 - **CI adjustments:**  
   - GitHub Actions (`.github/workflows/ci.yml`) runs Postgres and Redis services but only Postgres is used.  
   - `TESTCONTAINERS_RYUK_DISABLED=true` to avoid docker-in-docker permission issues.  
   - Vendored Portkey tests skipped via `echo`.  
-- **warnings removed:** rename migrations to millisecond prefixes to placate `node-pg-migrate`.
+- **migrations tooling:** switched from `node-pg-migrate` to Knex; keep timestamped filenames so `knex migrate:latest` applies them deterministically.
 
 ---
 
@@ -98,7 +99,7 @@ Vendored Portkey Gateway
 |-------|------------|-------------------------|
 | 502s during tests | Control plane returned nested `config` object with API key under `config.config.api_key`. Portkey expected flattened `provider` + `api_key`. | Normalise response in gateway (`normalizedConfig`). |
 | Hard-to-diagnose `/healthz` 404s | App Engine dispatch routes kept the `/control` prefix when handing off to the service; the handler only listened on `/`. | Mount handlers at both `/` and `/prefix` (Hono `.route('/control', ...)`). |
-| CI warnings about timestamps | Migrations named `20250101000000...` etc. Node-pg-migrate only recognises 13 or 17 digit timestamps. | Converted to millisecond prefixes (e.g., `1735689600000_initial_schema.cjs`). |
+| CI warnings about timestamps | Legacy node-pg-migrate required fixed-length timestamps and complained about our filenames. | Adopted Knex migrations with millisecond timestamp prefixes (e.g., `20250101000000_initial_schema.js`). |
 | Docker-in-Docker access | Testcontainers attempted to connect to Docker but Ryuk handshake failed in GHA. | Set `TESTCONTAINERS_RYUK_DISABLED=true` and rely on static Postgres service. |
 | Verbose env dumps | Boot logs print every env var (debug). Useful during early deploys but noisy; should be gated by `DEBUG_*`. |
 | Duplicate README/agents info | Early docs referenced hypothetical `SPEC.md`. Updated to stand-alone README & this post-mortem. |

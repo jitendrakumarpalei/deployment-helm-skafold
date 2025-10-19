@@ -15,7 +15,6 @@
   },
   "devDependencies": {
     "@types/node": "^20.11.30",
-    "node-pg-migrate": "^7.7.0",
     "testcontainers": "^10.10.3",
     "@testcontainers/postgresql": "^10.10.3",
     "tsx": "^4.7.0",

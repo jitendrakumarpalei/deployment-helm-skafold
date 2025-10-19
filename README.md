@@ -53,14 +53,16 @@ export ALBUS_BASEPATH="$CONTROL_PLANE_URL"
 ### Run Database Migrations
 
 ```
-# Ledger (billing, events, invoices)
-npm run migrate --workspace @stringcost/ledger
+# Apply migrations for both databases
+DATABASE_URL=postgres://stringcost:stringcost@localhost:5432/stringcost npm run db:migrate
 
-# Control plane (clients, provider credentials, model catalogue)
-node --loader ts-node/esm apps/control-plane/src/migrate.ts
+# (Optional) Run seed scripts (loads demo client, credentials, billing data)
+DATABASE_URL=postgres://stringcost:stringcost@localhost:5432/stringcost npm run db:seed
 ```
 
-Migrations default to `DATABASE_URL`. To use a different connection string, pass `--database-url=...`.
+The seed scripts create a demo API client with OpenAI/Anthropic virtual keys and sample ledger data so sandbox calls work out of the box.
+
+You can target individual services via `npm run migrate:control-plane` or `npm run migrate:ledger`. All scripts respect the `DATABASE_URL` environment variable.
 
 ### Start the Services Locally
 
@@ -250,4 +252,4 @@ npm run test --workspace @portkey-ai/gateway
 npm run gae:clean
 ```
 
-When adding new migrations, follow the millisecond timestamp naming pattern (e.g., `1738368000000_new_feature.cjs`) so `node-pg-migrate` recognises file order without logging warnings.
+When adding new Knex migrations, keep the filenames lexically ordered (e.g., `20250201091500_new_feature.js`) so `knex migrate:latest` applies them predictably.

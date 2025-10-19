@@ -20,13 +20,24 @@
     "build": "npm -ws run build",
     "test": "npm -ws run test",
     "test:ledger": "npm run test --workspace @stringcost/ledger",
-    "migrate": "npm run migrate --workspace @stringcost/ledger"
+    "migrate": "npm run migrate --workspace @stringcost/ledger",
+    "migrate:control-plane": "tsx ./node_modules/knex/bin/cli.js --knexfile apps/control-plane/knexfile.ts migrate:latest",
+    "migrate:ledger": "tsx ./node_modules/knex/bin/cli.js --knexfile apps/ledger/knexfile.ts migrate:latest",
+    "seed:control-plane": "tsx ./node_modules/knex/bin/cli.js --knexfile apps/control-plane/knexfile.ts seed:run",
+    "seed:ledger": "tsx ./node_modules/knex/bin/cli.js --knexfile apps/ledger/knexfile.ts seed:run",
+    "db:migrate": "npm run migrate:control-plane && npm run migrate:ledger",
+    "db:seed": "npm run seed:control-plane && npm run seed:ledger"
   },
   "devDependencies": {
     "langchain": "^0.2.16",
     "openai": "^4.52.0",
     "supertest": "^7.1.3",
+    "ts-node": "^10.9.2",
     "tsx": "^4.7.0",
     "typescript": "5.6.3"
+  },
+  "dependencies": {
+    "knex": "^3.1.0",
+    "pg": "^8.16.3"
   }
 }

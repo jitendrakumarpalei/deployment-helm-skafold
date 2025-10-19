@@ -1,42 +1,34 @@
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runner as runPgMigrate } from 'node-pg-migrate';
+import knex from 'knex';
+import { buildKnexConfig } from './knexConfig';
 
 export interface MigrationOptions {
   databaseUrl?: string;
   direction?: 'up' | 'down';
-  count?: number;
-  dryRun?: boolean;
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const migrationsDir = path.join(__dirname, '..', 'migrations');
-
 export async function runMigrations(options: MigrationOptions = {}): Promise<void> {
-  const {
-    databaseUrl = process.env.DATABASE_URL,
-    direction = 'up',
-    count,
-    dryRun = false
-  } = options;
-
+  const databaseUrl = options.databaseUrl ?? process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error('DATABASE_URL must be provided to run migrations');
   }
 
-  await runPgMigrate({
-    databaseUrl,
-    dir: migrationsDir,
-    direction,
-    migrationsTable: 'schema_migrations',
-    count,
-    dryRun,
-    verbose: true,
-    logger: {
-      info: () => undefined,
-      warn: console.warn,
-      error: console.error
+  const db = knex(buildKnexConfig(databaseUrl));
+  try {
+    if (options.direction === 'down') {
+      await db.migrate.rollback(undefined, true);
+    } else {
+      await db.migrate.latest();
     }
+  } finally {
+    await db.destroy();
+  }
+}
+
+const invokedPath = process.argv[1];
+if (invokedPath && invokedPath === fileURLToPath(import.meta.url)) {
+  runMigrations().catch((error) => {
+    console.error('Migration failed:', error);
+    process.exit(1);
   });
 }

@@ -1,32 +1,32 @@
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runner as runMigrate } from 'node-pg-migrate';
+import knex from 'knex';
+import { buildKnexConfig } from './knexConfig';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const migrationsDir = path.join(__dirname, '..', 'migrations');
+export interface MigrationOptions {
+  databaseUrl?: string;
+  direction?: 'up' | 'down';
+}
 
-export async function runMigrations(options: { databaseUrl?: string; direction?: 'up' | 'down'; count?: number } = {}): Promise<void> {
+export async function runMigrations(options: MigrationOptions = {}): Promise<void> {
   const databaseUrl = options.databaseUrl ?? process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error('DATABASE_URL must be set to run control-plane migrations');
   }
 
-  await runMigrate({
-    databaseUrl,
-    dir: migrationsDir,
-    direction: options.direction ?? 'up',
-    count: options.count,
-    migrationsTable: 'control_plane_schema_migrations',
-    logger: {
-      info: () => undefined,
-      warn: console.warn,
-      error: console.error,
-    },
-  });
+  const db = knex(buildKnexConfig(databaseUrl));
+  try {
+    if (options.direction === 'down') {
+      await db.migrate.rollback(undefined, true);
+    } else {
+      await db.migrate.latest();
+    }
+  } finally {
+    await db.destroy();
+  }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const invokedPath = process.argv[1];
+if (invokedPath && invokedPath === fileURLToPath(import.meta.url)) {
   runMigrations().catch((err) => {
     console.error('Control plane migration failed', err);
     process.exit(1);
