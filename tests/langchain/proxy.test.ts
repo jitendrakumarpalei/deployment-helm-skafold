@@ -9,6 +9,7 @@ import { runMigrations as runControlPlaneMigrations } from '../../apps/control-p
 import controlPlaneApp from '../../apps/control-plane/src/server';
 import { closePool as closeControlPlanePool } from '../../apps/control-plane/src/db';
 import { runWorkerOnce } from '../../apps/worker/src/worker';
+import { runControlPlaneSeeds, runLedgerSeeds } from '../helpers/seeds';
 
 const CONTROL_PLANE_BASE = 'http://control.stringcost.local';
 const GATEWAY_BASE = 'http://test';
@@ -25,32 +26,6 @@ async function resetDatabase(url: string) {
   const client = new Pool({ connectionString: url });
   await client.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
   await client.end();
-}
-
-async function seedControlPlane(db: Pool) {
-  const apiKey = 'sk-stringcost-123';
-  const { rows } = await db.query(
-    `INSERT INTO api_clients (name, api_key)
-       VALUES ($1, $2)
-       ON CONFLICT (api_key) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id`,
-    ['LangChain Test Client', apiKey]
-  );
-  const clientId = rows[0].id;
-
-  await db.query(
-    `INSERT INTO provider_credentials (api_client_id, provider, virtual_key, provider_api_key, metadata)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (virtual_key) DO UPDATE SET provider_api_key = EXCLUDED.provider_api_key`,
-    [clientId, 'openai', 'vk-openai-demo', 'sk-openai-real', JSON.stringify({ tier: 'test' })]
-  );
-
-  await db.query(
-    `INSERT INTO provider_models (provider, model_name, display_name, description)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (provider, model_name) DO NOTHING`,
-    ['openai', 'gpt-4o-mini', 'GPT-4o Mini', 'OpenAI GPT-4o mini model']
-  );
 }
 
 beforeAll(async () => {
@@ -82,7 +57,8 @@ beforeAll(async () => {
   await runControlPlaneMigrations({ databaseUrl });
 
   pool = new Pool({ connectionString: databaseUrl });
-  await seedControlPlane(pool);
+  await runLedgerSeeds(databaseUrl);
+  await runControlPlaneSeeds(databaseUrl);
 
   gatewayApp = (await import('../../apps/gateway/src/app')).default;
   const eventModule = await import('../../apps/event-collector/src/server');
@@ -92,8 +68,12 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  await pool.end();
-  await eventDbPool.end();
+  if (pool) {
+    await pool.end();
+  }
+  if (eventDbPool) {
+    await eventDbPool.end();
+  }
   await closeControlPlanePool();
   if (pgContainer) {
     await pgContainer.stop();
@@ -135,7 +115,7 @@ describe('LangChain → StringCost Gateway', () => {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            authorization: 'Bearer sk-stringcost-123',
+            authorization: 'Bearer sk-stringcost-demo',
           },
           body: JSON.stringify({
             provider: 'openai',
@@ -144,6 +124,7 @@ describe('LangChain → StringCost Gateway', () => {
             run_id: runId,
             user_id: 'user-langchain',
             metadata: { test: true },
+            virtual_key: 'vk-openai-demo',
           }),
         });
 
@@ -223,7 +204,7 @@ describe('LangChain → StringCost Gateway', () => {
       clientOptions: {
         fetch: fetchProxy as any,
         defaultHeaders: {
-          Authorization: 'Bearer sk-openai-real',
+          Authorization: 'Bearer sk-openai-demo',
         },
       },
     });

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { Client } from 'pg';
 import { runMigrations } from '../../apps/ledger/src/migrate';
+import { runLedgerSeeds } from '../helpers/seeds';
 
 type AppModule = typeof import('../../apps/event-collector/src/server');
 
@@ -32,6 +33,7 @@ beforeAll(async () => {
 
   process.env.DATABASE_URL = connectionString;
   await runMigrations({ databaseUrl: connectionString });
+  await runLedgerSeeds(connectionString);
 
   appModule = await import('../../apps/event-collector/src/server');
 }, 180_000);

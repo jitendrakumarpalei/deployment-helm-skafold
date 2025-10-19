@@ -154,7 +154,7 @@ Vendored Portkey Gateway
 
 ```bash
 curl -X POST https://api.stringcost.com/control/v1/presign \
-  -H "Authorization: Bearer sk-stringcost-123" \
+  -H "Authorization: Bearer sk-stringcost-demo" \
   -H "Content-Type: application/json" \
   -d '{
         "provider": "openai",
@@ -172,7 +172,7 @@ curl -X POST https://api.stringcost.com/control/v1/presign \
 
 ```bash
 curl "https://api.stringcost.com/llm/v1/chat/completions?kid=...&client=...&...&sig=..." \
-  -H "Authorization: Bearer sk-openai-real" \
+  -H "Authorization: Bearer sk-openai-demo" \
   -H "Content-Type: application/json" \
   -d '{
         "model": "gpt-4o-mini",

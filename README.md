@@ -104,7 +104,7 @@ Supertest-based API suites (gateway and control plane) must bind to a local sock
 
 Runtime requests no longer require custom headers. Instead, clients obtain a **one-use signed URL** from the control plane and then call that URL with the same headers they would send to the upstream provider (e.g., OpenAI or Anthropic). The signed URL encodes provider selection, virtual keys, run/user IDs, and optional extras (retry rules, metadata, body hash, etc.).
 
-1. **Pre-sign** the target path using your StringCost API key (`Authorization: Bearer sk-stringcost-123`).
+1. **Pre-sign** the target path using your StringCost API key (`Authorization: Bearer sk-stringcost-demo`).
 2. **Invoke** the returned URL with your normal provider headers (`Authorization: Bearer sk-openai-...`).
 3. **(Optional)** Emit additional ledger events to `/events` for tool calls or custom steps.
 
@@ -112,7 +112,7 @@ Runtime requests no longer require custom headers. Instead, clients obtain a **o
 
 ```bash
 curl -X POST https://api.stringcost.com/control/v1/presign \
-  -H "Authorization: Bearer sk-stringcost-123" \
+  -H "Authorization: Bearer sk-stringcost-demo" \
   -H "Content-Type: application/json" \
   -d '{
         "provider": "openai",
@@ -121,9 +121,9 @@ curl -X POST https://api.stringcost.com/control/v1/presign \
         "session_id": "018f1d5f-8aa5-7c93-a44a-53f97b07c1d3",
         "run_id": "6a9ab408-541f-40d3-af8a-5091c58cb89d",
         "user_id": "customer-4242",
+        "virtual_key": "vk-openai-demo",
         "metadata": {"tier": "gold"},
         "config": {
-          "virtual_key": "vk-openai-prod",
           "retry": {"attempts": 3, "on_status_codes": [429] }
         },
         "expires_in": 45
@@ -169,7 +169,7 @@ METHOD\nHOST\nPATH\nBODY_HASH\nEXP\nNONCE\nSESSION\nCLIENT\nPROVIDER\nSCOPE\nCFG
 
 ```bash
 curl "https://api.stringcost.com/llm/v1/chat/completions?kid=...&client=...&...&sig=..." \
-  -H "Authorization: Bearer sk-openai-real" \
+  -H "Authorization: Bearer sk-openai-demo" \
   -H "Content-Type: application/json" \
   -d '{
         "model": "gpt-4o-mini",

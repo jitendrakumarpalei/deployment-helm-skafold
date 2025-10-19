@@ -2,6 +2,7 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { Client } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from '../../apps/ledger/src/migrate';
+import { runLedgerSeeds } from '../helpers/seeds';
 
 let container: PostgreSqlContainer | undefined;
 let connectionString: string;
@@ -28,6 +29,7 @@ beforeAll(async () => {
   process.env.DATABASE_URL = connectionString;
   await resetDatabase(connectionString);
   await runMigrations({ databaseUrl: connectionString });
+  await runLedgerSeeds(connectionString);
 }, 180_000);
 
 afterAll(async () => {
@@ -40,6 +42,17 @@ describe('Database migrations', () => {
   it('creates ledger tables and supports inserts', async () => {
     const client = new Client({ connectionString });
     await client.connect();
+
+    const seededProject = await client.query(
+      `SELECT p.name, bi.stripe_customer_id
+         FROM project p
+         JOIN billing_info bi ON bi.id = p.billing_info_id
+        WHERE p.name = $1`,
+      ['Demo Project']
+    );
+
+    expect(seededProject.rowCount).toBe(1);
+    expect(seededProject.rows[0].stripe_customer_id).toBe('cus_demo_123');
 
     const billingInfo = await client.query(
       `INSERT INTO billing_info(stripe_customer_id, country_code, vat_registered)
@@ -54,7 +67,7 @@ describe('Database migrations', () => {
       `INSERT INTO project(name, billing_info_id)
        VALUES ($1, $2)
        RETURNING id`,
-      ['Demo Project', billingInfoId]
+      ['Manual Test Project', billingInfoId]
     );
 
     const projectId = project.rows[0].id as string;

@@ -3,6 +3,7 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { Pool } from 'pg';
 import { runMigrations } from '../../apps/ledger/src/migrate';
 import { startWorker } from '../../apps/worker/src/worker';
+import { runLedgerSeeds } from '../helpers/seeds';
 
 let pgContainer: PostgreSqlContainer | undefined;
 let pool: Pool;
@@ -33,6 +34,7 @@ beforeAll(async () => {
   process.env.META_LLM_API_KEY = 'dummy';
 
   await runMigrations({ databaseUrl });
+  await runLedgerSeeds(databaseUrl);
 
   pool = new Pool({ connectionString: databaseUrl });
 
