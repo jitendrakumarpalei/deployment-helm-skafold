@@ -1,0 +1,67 @@
+{{- range .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  labels:
+    app: {{ .name }}
+spec:
+  replicas: {{ .replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ .name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .name }}
+    spec:
+      containers:
+        - name: {{ .name }}
+          image: {{ .image | default .name }}
+          imagePullPolicy: {{ .imagePullPolicy | default "IfNotPresent" }}
+          ports:
+            - containerPort: {{ .containerPort | default 8080 }}
+{{- if .env }}
+          env:
+{{- range .env }}
+            - name: {{ .name }}
+{{- if hasKey . "value" }}
+              value: {{ .value | quote }}
+{{- else if hasKey . "valueFrom" }}
+              valueFrom:
+{{ toYaml .valueFrom | indent 14 }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .envFrom }}
+          envFrom:
+{{ toYaml .envFrom | indent 12 }}
+{{- end }}
+{{- if .resources }}
+          resources:
+{{ toYaml .resources | indent 12 }}
+{{- else }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+{{- end }}
+{{- if .healthPath }}
+          livenessProbe:
+            httpGet:
+              path: {{ .healthPath }}
+              port: {{ .containerPort | default 8080 }}
+            initialDelaySeconds: 30
+            periodSeconds: 10
+{{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ .readinessPath | default .healthPath | default "/healthz" }}
+              port: {{ .containerPort | default 8080 }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+{{- end }}

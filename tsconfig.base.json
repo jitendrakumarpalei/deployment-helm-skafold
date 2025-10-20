@@ -10,6 +10,11 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",
-    "typeRoots": ["./types", "./node_modules/@types"]
+    "typeRoots": ["./types", "./node_modules/@types"],
+    "baseUrl": ".",
+    "paths": {
+      "@stringcost/shared/*": ["apps/shared/src/*"],
+      "@stringcost/shared": ["apps/shared/src/index.ts"]
+    }
   }
 }

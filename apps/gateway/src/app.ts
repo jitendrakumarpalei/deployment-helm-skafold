@@ -3,7 +3,7 @@ import { Hono, type Context } from 'hono';
 import portkeyApp from '../../../vendor/portkey-gateway/src/index';
 import { adaptResponse } from './middleware/responseAdapter';
 import { createForwardRequest } from './middleware/requestAdapter';
-import { verifySignedRequest } from '../../shared/signedUrl';
+import { verifySignedRequest } from '@stringcost/shared/signedUrl';
 import { assertNonce } from './replayStore';
 
 const app = new Hono();

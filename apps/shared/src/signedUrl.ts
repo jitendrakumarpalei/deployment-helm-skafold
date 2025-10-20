@@ -1,4 +1,12 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from 'node:crypto';
 
 const DEFAULT_TTL_SECONDS = Number(process.env.SIGNED_URL_DEFAULT_TTL ?? '60');
 const MAX_TTL_SECONDS = Number(process.env.SIGNED_URL_MAX_TTL ?? '600');
@@ -126,39 +134,34 @@ function loadConfigEncryptionKey(): Buffer {
 
 function encryptConfig(config: Record<string, unknown>): { ciphertext: string; hash: string } {
   const key = loadConfigEncryptionKey();
+
   const iv = randomBytes(AES_IV_LENGTH);
-  const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
   const plaintext = Buffer.from(JSON.stringify(config), 'utf8');
-  const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  const payload = Buffer.concat([iv, tag, encrypted]);
-  const cipherText = base64urlEncode(payload);
-  return { ciphertext: cipherText, hash: sha256Base64url(cipherText) };
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  const combined = Buffer.concat([iv, authTag, ciphertext]);
+  const hash = sha256Base64url(ciphertext);
+  return { ciphertext: base64urlEncode(combined), hash };
 }
 
 function decryptConfig(ciphertext: string): Record<string, unknown> {
   const key = loadConfigEncryptionKey();
-  const payload = base64urlDecode(ciphertext);
-  if (payload.length <= AES_IV_LENGTH + 16) {
-    throw new Error('Encrypted config payload too short');
+  const combined = base64urlDecode(ciphertext);
+  if (combined.length < AES_IV_LENGTH + 16) {
+    throw new Error('Ciphertext too short');
   }
-  const iv = payload.subarray(0, AES_IV_LENGTH);
-  const tag = payload.subarray(AES_IV_LENGTH, AES_IV_LENGTH + 16);
-  const encrypted = payload.subarray(AES_IV_LENGTH + 16);
-  const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
-  decipher.setAuthTag(tag);
-  const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
-  return JSON.parse(decrypted.toString('utf8'));
+  const iv = combined.subarray(0, AES_IV_LENGTH);
+  const authTag = combined.subarray(AES_IV_LENGTH, AES_IV_LENGTH + 16);
+  const payload = combined.subarray(AES_IV_LENGTH + 16);
+  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(authTag);
+  const plaintext = Buffer.concat([decipher.update(payload), decipher.final()]);
+  return JSON.parse(plaintext.toString('utf8')) as Record<string, unknown>;
 }
 
-function clampExpiry(expiresIn?: number): { expiresAt: number; ttl: number } {
-  const base = Number.isFinite(expiresIn) ? Number(expiresIn) : DEFAULT_TTL_SECONDS;
-  const ttl = Math.max(1, Math.min(base, MAX_TTL_SECONDS));
-  const expiresAt = Math.floor(Date.now() / 1000) + ttl;
-  return { expiresAt, ttl };
-}
-
-function canonicalString(params: {
+function canonicalString(input: {
   method: string;
   host: string;
   path: string;
@@ -175,66 +178,66 @@ function canonicalString(params: {
   metadataHash?: string;
 }): string {
   return [
-    params.method,
-    params.host,
-    params.path,
-    params.bodyHash ?? '',
-    String(params.exp),
-    params.nonce,
-    params.sessionId,
-    params.clientId,
-    params.provider,
-    params.scope ?? '',
-    params.cfgHash,
-    params.runId ?? '',
-    params.userId ?? '',
-    params.metadataHash ?? '',
+    input.method,
+    input.host,
+    input.path,
+    input.bodyHash ?? '',
+    input.exp,
+    input.nonce,
+    input.sessionId,
+    input.clientId,
+    input.provider,
+    input.scope ?? '',
+    input.cfgHash,
+    input.runId ?? '',
+    input.userId ?? '',
+    input.metadataHash ?? '',
   ].join('\n');
 }
 
-function generateSessionId(): string {
-  // TODO: replace with UUIDv7 when Node provides native support.
-  return randomUUID();
+function canonicalConfigHash(config: Record<string, unknown>): string {
+  return sha256Base64url(JSON.stringify(config));
+}
+
+function coerceTtl(params: PresignConfig): number {
+  const requested = params.expiresIn ?? DEFAULT_TTL_SECONDS;
+  return Math.min(Math.max(requested, 1), MAX_TTL_SECONDS);
 }
 
 export function createSignedUrl(params: PresignConfig): SignedUrlComponents {
-  const keys = loadSigningKeys();
-  const signingKey = selectPrimaryKey(keys);
-  const { expiresAt } = clampExpiry(params.expiresIn);
-  const sessionId = params.sessionId ?? generateSessionId();
+  const signingKeys = loadSigningKeys();
+  const key = selectPrimaryKey(signingKeys);
+
+  const sessionId = params.sessionId ?? randomUUID();
   const nonce = params.nonce ?? randomUUID();
+  const ttl = coerceTtl(params);
+  const expiresAt = Math.floor(Date.now() / 1000) + ttl;
 
-  const { ciphertext: cfgCipher, hash: cfgHash } = encryptConfig(params.routeConfig);
-
-  const metadataString = params.metadata ? JSON.stringify(params.metadata) : '';
-  const metadataEncoded = metadataString ? base64urlEncode(Buffer.from(metadataString, 'utf8')) : undefined;
+  const metadataEncoded = params.metadata ? Buffer.from(JSON.stringify(params.metadata), 'utf8').toString('base64') : undefined;
   const metadataHash = metadataEncoded ? sha256Base64url(metadataEncoded) : undefined;
 
-  const bodyHash = params.bodyHash ? params.bodyHash.toLowerCase() : undefined;
-
+  const { ciphertext, hash } = encryptConfig(params.routeConfig);
   const canonical = canonicalString({
     method: params.method.toUpperCase(),
     host: params.host,
     path: params.path,
-    bodyHash,
+    bodyHash: params.bodyHash,
     exp: expiresAt,
     nonce,
     sessionId,
     clientId: params.clientId,
     provider: params.provider,
     scope: params.scope,
-    cfgHash,
+    cfgHash: hash,
     runId: params.runId,
     userId: params.userId,
     metadataHash,
   });
 
-  const signature = createHmac('sha256', signingKey.key)
-    .update(canonical, 'utf8')
-    .digest();
+  const signature = createHmac('sha256', key.key).update(canonical, 'utf8').digest();
 
   const search = new URLSearchParams();
-  search.set('kid', signingKey.kid);
+  search.set('kid', key.kid);
   search.set('client', params.clientId);
   search.set('provider', params.provider);
   search.set('method', params.method.toUpperCase());
@@ -243,9 +246,33 @@ export function createSignedUrl(params: PresignConfig): SignedUrlComponents {
   search.set('exp', String(expiresAt));
   search.set('nonce', nonce);
   search.set('session', sessionId);
-  search.set('cfg', cfgCipher);
-  search.set('cfg_h', cfgHash);
-  search.set('sig', base64urlEncode(signature));
+  search.set('cfg', ciphertext);
+  search.set('cfg_h', hash);
+  if (metadataEncoded) search.set('meta', metadataEncoded);
+
+  const bodyHash = params.bodyHash ? params.bodyHash.toLowerCase() : undefined;
+  const canonicalBodyHash = bodyHash ? sha256Base64url(bodyHash) : undefined;
+  const signaturePayload = canonicalString({
+    method: params.method.toUpperCase(),
+    host: params.host,
+    path: params.path,
+    bodyHash: canonicalBodyHash,
+    exp: expiresAt,
+    nonce,
+    sessionId,
+    clientId: params.clientId,
+    provider: params.provider,
+    scope: params.scope,
+    cfgHash: hash,
+    runId: params.runId,
+    userId: params.userId,
+    metadataHash,
+  });
+  const encodedSignaturePayload = Buffer.from(signaturePayload, 'utf8');
+  const combinedSignature = Buffer.concat([encodedSignaturePayload, signature]);
+  const signatureDigest = createHash('sha256').update(combinedSignature).digest();
+
+  search.set('sig', base64urlEncode(signatureDigest));
 
   if (params.scope) search.set('scope', params.scope);
   if (bodyHash) search.set('body', bodyHash);

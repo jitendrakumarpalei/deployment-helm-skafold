@@ -1,0 +1,5 @@
+# Deployment artifacts
+gke-deployer-key.json
+
+# Skaffold cache
+.skaffold/

@@ -100,6 +100,48 @@ TESTCONTAINERS_RYUK_DISABLED=true npm run test:ledger
 
 Supertest-based API suites (gateway and control plane) must bind to a local socket. Enable them by exporting `ENABLE_SUPERTEST=true` before running the respective workspace tests (CI jobs set this automatically; sandboxes without socket access will skip these suites).
 
+## Deploy to GKE (App Engine–style workflow)
+
+You can deploy directly from this repository—no GitOps required. The Terraform stack provisions the cluster, static IP, and deployer service account; the `npm run gae:deploy` script uses Skaffold + Cloud Build to build/publish images and apply the Helm chart.
+
+### 1. One-time setup
+
+```bash
+cd deploy/gke/terraform
+terraform init
+terraform apply                           # enables APIs, creates cluster(s), reserves static IP
+
+# Point your DNS A record at the emitted static IP before continuing
+
+# (Optional) expose outputs as env vars for the deploy script
+export CLUSTER_NAME="$(terraform -chdir=terraform output -raw cluster_name)"
+export DEV_CLUSTER_NAME="$(terraform -chdir=terraform output -raw dev_cluster_name 2>/dev/null || true)"
+export PROD_CLUSTER_NAME="$(terraform -chdir=terraform output -raw prod_cluster_name 2>/dev/null || true)"
+export REGION="${REGION:-us-central1}"
+```
+
+Create the runtime secret expected by the Helm chart (adjust values for your environment):
+
+```bash
+kubectl create secret generic stringcost-config \
+  --from-literal=database_url="postgres://user:pass@host:5432/dbname" \
+  --from-literal=classifier_endpoint="https://classifier.internal/v1/classify" \
+  --from-literal=classifier_api_key="replace-me"
+```
+
+> If the optional dev/prod clusters are disabled, Terraform outputs the literal string `not created`. In that case the corresponding `export` is optional; the deploy script simply skips `dev`/`prod` profiles unless the clusters exist.
+
+### 2. Deploy from your laptop (or CI runner)
+
+```bash
+cd deploy/gke
+npm run gae:deploy        # main cluster
+# npm run gae:deploy:dev  # optional dev cluster (if created)
+# npm run gae:deploy:prod # optional prod cluster (if created)
+```
+
+The script activates the Terraform-generated service account, fetches cluster credentials, prunes old images, runs `skaffold run` (which triggers Cloud Build), and finally applies the Helm release. No GitOps or additional tooling is required—just rerun the command whenever you want to deploy new code.
+
 ## API Usage
 
 Runtime requests no longer require custom headers. Instead, clients obtain a **one-use signed URL** from the control plane and then call that URL with the same headers they would send to the upstream provider (e.g., OpenAI or Anthropic). The signed URL encodes provider selection, virtual keys, run/user IDs, and optional extras (retry rules, metadata, body hash, etc.).

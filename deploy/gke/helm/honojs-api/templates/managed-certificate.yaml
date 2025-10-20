@@ -1,0 +1,9 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: honojs-apis-cert
+spec:
+  domains:
+    - {{ .Values.domain }}
+{{- end }}

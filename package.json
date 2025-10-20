@@ -29,6 +29,7 @@
     "db:seed": "npm run seed:control-plane && npm run seed:ledger"
   },
   "devDependencies": {
+    "esbuild": "^0.23.0",
     "langchain": "^0.2.16",
     "openai": "^4.52.0",
     "supertest": "^7.1.3",

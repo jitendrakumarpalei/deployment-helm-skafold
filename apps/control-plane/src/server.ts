@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { getPool } from './db.js';
-import { createSignedUrl } from '../shared/signedUrl';
+import { createSignedUrl } from '@stringcost/shared/signedUrl';
 
 const controlRoutes = new Hono();
 
@@ -268,7 +268,7 @@ controlRoutes.post('/v1/presign', async (c) => {
   });
 
   const presignedUrl = new URL(`${baseUrl}/llm${path}`);
-  signed.params.forEach((value, key) => presignedUrl.searchParams.set(key, value));
+  signed.params.forEach((value: string, key: string) => presignedUrl.searchParams.set(key, value));
 
   return c.json({
     url: presignedUrl.toString(),

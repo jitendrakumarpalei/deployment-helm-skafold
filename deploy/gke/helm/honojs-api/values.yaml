@@ -1,0 +1,68 @@
+domain: "yourdomain.com"
+
+ingress:
+  enabled: true
+  className: "gce"
+  staticIpName: "honojs-apis-ip"
+
+services:
+  - name: gateway
+    image: gateway
+    replicas: 2
+    containerPort: 8787
+    ingressPath: /llm
+    healthPath: /healthz
+    env:
+      - name: PORT
+        value: "8787"
+  - name: control-plane
+    image: control-plane
+    replicas: 1
+    containerPort: 8080
+    ingressPath: /control
+    healthPath: /healthz
+    env:
+      - name: PORT
+        value: "8080"
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: stringcost-config
+            key: database_url
+  - name: event-collector
+    image: event-collector
+    replicas: 1
+    containerPort: 8080
+    ingressPath: /events
+    healthPath: /healthz
+    env:
+      - name: PORT
+        value: "8080"
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: stringcost-config
+            key: database_url
+  - name: worker
+    image: worker
+    replicas: 1
+    containerPort: 8080
+    healthPath: /healthz
+    env:
+      - name: PORT
+        value: "8080"
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: stringcost-config
+            key: database_url
+      - name: META_LLM_CLASSIFIER_ENDPOINT
+        valueFrom:
+          secretKeyRef:
+            name: stringcost-config
+            key: classifier_endpoint
+      - name: META_LLM_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: stringcost-config
+            key: classifier_api_key

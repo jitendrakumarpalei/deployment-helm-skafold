@@ -1,5 +1,7 @@
 node_modules/
 dist/
+out/
+build/
 .env
 .env.*
 .DS_Store
@@ -14,3 +16,10 @@ deploy/appengine/service-account.json
 deploy/appengine/.env
 deploy/appengine/staging/
 deploy/appengine/.env
+deploy/gke/.skaffold/
+deploy/gke/gke-deployer-key.json
+deploy/gke/terraform/.terraform/
+deploy/gke/terraform/.terraform.lock.hcl
+deploy/gke/terraform/*.tfstate
+deploy/gke/terraform/*.tfstate.backup
+deploy/gke/terraform/*.tfplan

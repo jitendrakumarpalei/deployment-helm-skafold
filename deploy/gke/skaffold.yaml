@@ -1,0 +1,47 @@
+apiVersion: skaffold/v4beta6
+kind: Config
+build:
+  googleCloudBuild:
+    logging: CLOUD_LOGGING_ONLY
+  tagPolicy:
+    inputDigest: {}
+  artifacts:
+    - image: gateway
+      context: ../..
+      docker:
+        dockerfile: apps/gateway/Dockerfile
+    - image: control-plane
+      context: ../..
+      docker:
+        dockerfile: apps/control-plane/Dockerfile
+    - image: event-collector
+      context: ../..
+      docker:
+        dockerfile: apps/event-collector/Dockerfile
+    - image: worker
+      context: ../..
+      docker:
+        dockerfile: apps/worker/Dockerfile
+deploy:
+  helm:
+    releases:
+      - name: honojs-apis
+        chartPath: helm/honojs-api
+        valuesFiles:
+          - helm/honojs-api/values.yaml
+
+profiles:
+  - name: dev
+    deploy:
+      helm:
+        releases:
+          - name: honojs-apis
+            chartPath: helm/honojs-api
+            namespace: dev
+  - name: prod
+    deploy:
+      helm:
+        releases:
+          - name: honojs-apis
+            chartPath: helm/honojs-api
+            namespace: prod

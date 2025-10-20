@@ -1,0 +1,17 @@
+{{- range .Values.services }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+{{- if .ingressPath }}
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+{{- end }}
+spec:
+  selector:
+    app: {{ .name }}
+  ports:
+    - port: 80
+      targetPort: {{ .containerPort | default 8080 }}
+{{- end }}

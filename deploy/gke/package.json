@@ -1,0 +1,13 @@
+{
+  "name": "gke-deployment",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "gae:deploy": "./deploy.sh",
+    "gae:deploy:dev": "./deploy.sh dev",
+    "gae:deploy:prod": "./deploy.sh prod",
+    "cleanup": "./gcr-cleanup.sh",
+    "check-cert": "kubectl describe managedcertificate honojs-apis-cert",
+    "get-ip": "gcloud compute addresses describe honojs-apis-ip --global --format='get(address)'"
+  }
+}

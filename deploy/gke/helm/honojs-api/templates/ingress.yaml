@@ -1,0 +1,27 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: honojs-apis-ingress
+  annotations:
+    kubernetes.io/ingress.class: {{ .Values.ingress.className | quote }}
+    kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.staticIpName | quote }}
+    networking.gke.io/managed-certificates: "honojs-apis-cert"
+    kubernetes.io/ingress.allow-http: "false"
+spec:
+  rules:
+    - host: {{ .Values.domain }}
+      http:
+        paths:
+          {{- range .Values.services }}
+          {{- if .ingressPath }}
+          - path: {{ .ingressPath }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .name }}
+                port:
+                  number: 80
+          {{- end }}
+          {{- end }}
+{{- end }}
