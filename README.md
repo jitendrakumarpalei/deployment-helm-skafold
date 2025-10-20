@@ -104,6 +104,23 @@ Supertest-based API suites (gateway and control plane) must bind to a local sock
 
 You can deploy directly from this repository—no GitOps required. The Terraform stack provisions the cluster, static IP, and deployer service account; the `npm run gae:deploy` script uses Skaffold + Cloud Build to build/publish images and apply the Helm chart.
 
+### Required credentials & permissions
+
+1. **Personal (interactive) account** – the user running Terraform must authenticate with:
+   ```bash
+   gcloud auth login                     # optional but recommended
+   gcloud auth application-default login # required for Terraform
+   ```
+   The account needs the ability to enable services and create IAM bindings/networks on the target project. Practically this means either `roles/owner` or a custom combination that includes at least:
+   - `roles/serviceusage.serviceUsageAdmin` (enable APIs)
+   - `roles/resourcemanager.projectIamAdmin` (grant IAM roles to the deployer SA)
+   - `roles/container.admin` / `roles/container.clusterAdmin` (create clusters)
+   - `roles/compute.networkAdmin` (reserve global IPs)
+
+2. **Deployer service account** – Terraform creates `gke-deployer` with the minimal roles needed for CLI deployments (`roles/container.developer`, `roles/storage.admin`, `roles/cloudbuild.builds.editor`, `roles/artifactregistry.writer`, `roles/compute.viewer`). The associated JSON key is written to `deploy/gke/gke-deployer-key.json`; treat it like a secret (never commit it, rotate if leaked).
+
+3. **Local tools** – install `terraform`, `gcloud`, `kubectl`, `skaffold`, and `helm`. When Terraform finishes, it leaves the generated key on disk and you can use it immediately via the deployment script. If you run deployments in CI, store the key (or regenerate it) in the pipeline’s secret store.
+
 ### 1. One-time setup
 
 ```bash
