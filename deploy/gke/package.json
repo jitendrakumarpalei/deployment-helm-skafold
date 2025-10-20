@@ -7,6 +7,7 @@
     "gae:deploy:dev": "./deploy.sh dev",
     "gae:deploy:prod": "./deploy.sh prod",
     "cleanup": "./gcr-cleanup.sh",
+    "docker:clean": "docker image prune -af || true",
     "check-cert": "kubectl describe managedcertificate honojs-apis-cert",
     "get-ip": "gcloud compute addresses describe honojs-apis-ip --global --format='get(address)'"
   }

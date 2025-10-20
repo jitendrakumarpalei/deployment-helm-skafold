@@ -106,8 +106,9 @@ You can deploy directly from this repository—no GitOps required. The Terraform
 
 ### Required credentials & permissions
 
-1. **Personal (interactive) account** – the user running Terraform must authenticate with:
+1. **Personal (interactive) account** – the user running Terraform must set the active project and authenticate:
    ```bash
+   gcloud config set project <YOUR_PROJECT_ID>
    gcloud auth login                     # optional but recommended
    gcloud auth application-default login # required for Terraform
    ```
@@ -152,12 +153,18 @@ kubectl create secret generic stringcost-config \
 
 ```bash
 cd deploy/gke
-npm run gae:deploy        # main cluster
+npm run gae:deploy        # main cluster (Cloud Build builds & pushes images)
 # npm run gae:deploy:dev  # optional dev cluster (if created)
 # npm run gae:deploy:prod # optional prod cluster (if created)
 ```
 
-The script activates the Terraform-generated service account, fetches cluster credentials, prunes old images, runs `skaffold run` (which triggers Cloud Build), and finally applies the Helm release. No GitOps or additional tooling is required—just rerun the command whenever you want to deploy new code.
+`npm run gae:deploy` runs `skaffold run`, which uses **Google Cloud Build** to build the Docker images defined in `apps/*/Dockerfile` and pushes them to Artifact/GCR before Helm rolls them out. No images are built locally by default; if you do local Docker work for debugging, you can clear stale layers afterwards with:
+
+```bash
+npm run docker:clean       # runs `docker image prune -af` (best-effort)
+```
+
+The deployment script activates the Terraform-generated service account, fetches cluster credentials, prunes old images from the registry, triggers Cloud Build via Skaffold, and finally applies the Helm release. Just rerun the command whenever you want to deploy new code.
 
 ## API Usage
 
