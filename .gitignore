@@ -23,3 +23,4 @@ deploy/gke/terraform/.terraform.lock.hcl
 deploy/gke/terraform/*.tfstate
 deploy/gke/terraform/*.tfstate.backup
 deploy/gke/terraform/*.tfplan
+apps/shared/src/*.js

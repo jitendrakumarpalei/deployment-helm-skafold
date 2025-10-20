@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import { createAdaptorServer } from '@hono/node-server';
 import gatewayApp from '../../apps/gateway/src/app';
-import { createSignedUrl } from '../../apps/shared/signedUrl';
+import { createSignedUrl } from '@stringcost/shared/signedUrl';
 
 const canListen = process.env.CI === 'true' && process.env.ENABLE_SUPERTEST === 'true';
 const describeSuite = canListen ? describe : describe.skip;

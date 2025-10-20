@@ -251,28 +251,8 @@ export function createSignedUrl(params: PresignConfig): SignedUrlComponents {
   if (metadataEncoded) search.set('meta', metadataEncoded);
 
   const bodyHash = params.bodyHash ? params.bodyHash.toLowerCase() : undefined;
-  const canonicalBodyHash = bodyHash ? sha256Base64url(bodyHash) : undefined;
-  const signaturePayload = canonicalString({
-    method: params.method.toUpperCase(),
-    host: params.host,
-    path: params.path,
-    bodyHash: canonicalBodyHash,
-    exp: expiresAt,
-    nonce,
-    sessionId,
-    clientId: params.clientId,
-    provider: params.provider,
-    scope: params.scope,
-    cfgHash: hash,
-    runId: params.runId,
-    userId: params.userId,
-    metadataHash,
-  });
-  const encodedSignaturePayload = Buffer.from(signaturePayload, 'utf8');
-  const combinedSignature = Buffer.concat([encodedSignaturePayload, signature]);
-  const signatureDigest = createHash('sha256').update(combinedSignature).digest();
 
-  search.set('sig', base64urlEncode(signatureDigest));
+  search.set('sig', base64urlEncode(signature));
 
   if (params.scope) search.set('scope', params.scope);
   if (bodyHash) search.set('body', bodyHash);

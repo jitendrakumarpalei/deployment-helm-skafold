@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer';
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
 import app from '../../apps/gateway/src/app';
 import portkeyApp from '../../vendor/portkey-gateway/src/index';
-import { createSignedUrl } from '../../apps/shared/signedUrl';
+import { createSignedUrl } from '@stringcost/shared/signedUrl';
 
 let portkeyFetchSpy: ReturnType<typeof vi.spyOn> | undefined;
 let forwardedRequest: Request | undefined;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createSignedUrl, verifySignedRequest } from '../../apps/shared/signedUrl';
+import { createSignedUrl, verifySignedRequest } from '@stringcost/shared/signedUrl';
 
 describe('signedUrl', () => {
   const key = Buffer.alloc(32, 1).toString('base64');
