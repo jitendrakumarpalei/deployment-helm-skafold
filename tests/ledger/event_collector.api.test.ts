@@ -92,18 +92,20 @@ describeSuite('Event Collector API', () => {
     expect(response.body.action_type).toBe('chat_completion');
   });
 
-  it.skip.each([
+  it.each([
     { body: { user_id: '12345678-1234-1234-1234-123456789abc', outcome: 'success' }, message: /run_id/i },
     { body: { run_id: 'not-a-uuid', user_id: '12345678-1234-1234-1234-123456789abc', outcome: 'success' }, message: /uuid/i },
   ])('rejects invalid body ($body)', async ({ body, message }) => {
-    // Skipped: response.body.message format issue needs investigation
     const response = await request(server!).post('/events').send(body);
     expect(response.status).toBe(400);
-    expect(response.body.message).toMatch(message);
+    // zValidator returns errors in response.body.error.issues or response.body.message
+    const errorMessage = response.body.message || JSON.stringify(response.body);
+    expect(errorMessage).toMatch(message);
   });
 
   it.skip('rejects requests that exceed the rate limit', async () => {
-    // Skipped because DISABLE_RATE_LIMITING is set in CI
+    // Skipped: Rate limiting is disabled via DISABLE_RATE_LIMITING=true for test performance.
+    // To test rate limiting: remove DISABLE_RATE_LIMITING and ensure rate_limit schema exists in DB.
     // Temporarily lower the rate limit for this test
     vi.mock('hono-rate-limiter', async (importOriginal) => {
       const original = await importOriginal<typeof import('hono-rate-limiter')>();

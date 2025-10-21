@@ -4,6 +4,10 @@ if (!process.env.URL_TOKEN_KEY) {
 }
 // Disable rate limiting for tests
 process.env.DISABLE_RATE_LIMITING = 'true';
+// Set dummy DATABASE_URL before imports to avoid module load errors
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = 'postgresql://dummy:dummy@localhost:5432/dummy';
+}
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
@@ -13,7 +17,7 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { createSignedUrl } from '@stringcost/shared/signedUrl';
 import { runMigrations as runControlPlaneMigrations } from '../../apps/control-plane/src/migrate';
 
-// Dynamically import to ensure env vars are set first
+// Dynamically import gateway app to ensure env vars are set first
 const gatewayAppPromise = import('../../apps/gateway/src/app');
 let gatewayApp: any;
 
@@ -73,10 +77,7 @@ afterAll(async () => {
   }
 });
 
-describeSuite.skip('Gateway signed URL handling', () => {
-  // Skipped: Supertest query parameter handling issue with signed URLs
-  // Core gateway functionality is tested in wrapper.test.ts
-  // Integration flow is tested in langchain/proxy.test.ts
+describeSuite('Gateway signed URL handling', () => {
   it('returns ok for /healthz', async () => {
     const response = await request(server!).get('/healthz');
     expect(response.status).toBe(200);
@@ -101,10 +102,20 @@ describeSuite.skip('Gateway signed URL handling', () => {
       routeConfig: { api_key: 'sk-real' },
     });
 
+    // Debug: verify signed params include kid
+    expect(signed.params.has('kid')).toBe(true);
+
+    // Build URL with query parameters manually
+    const url = `/llm/v1/chat/completions?${signed.params.toString()}`;
+
     const response = await request(server!)
-      .post('/llm/v1/chat/completions')
-      .query(Object.fromEntries(signed.params.entries()))
+      .post(url)
       .send({ model: 'gpt-4o-mini' });
+
+    if (response.status !== 200) {
+      console.log('Response body:', response.body);
+      console.log('Response status:', response.status);
+    }
 
     expect(response.status).toBe(200);
   });
@@ -119,21 +130,20 @@ describeSuite.skip('Gateway signed URL handling', () => {
       routeConfig: { api_key: 'sk-real' },
     });
 
+    const url = `/llm/v1/chat/completions?${signed.params.toString()}`;
     const agent = request.agent(server!);
-    const req = agent.post('/llm/v1/chat/completions')
-      .query(Object.fromEntries(signed.params.entries()))
-      .send({ model: 'gpt-4o-mini' });
 
-    const res1 = await req;
+    const res1 = await agent.post(url).send({ model: 'gpt-4o-mini' });
     expect(res1.status).toBe(200);
 
-    const res2 = await req;
+    const res2 = await agent.post(url).send({ model: 'gpt-4o-mini' });
     expect(res2.status).toBe(409);
     expect(res2.body.message).toContain('replay');
   });
 
   it.skip('rejects requests that exceed the rate limit', async () => {
-    // Skipped because DISABLE_RATE_LIMITING is set in CI
+    // Skipped: Rate limiting is disabled via DISABLE_RATE_LIMITING=true for test performance.
+    // To test rate limiting: remove DISABLE_RATE_LIMITING and ensure rate_limit schema exists in DB.
     // Temporarily lower the rate limit for this test
     vi.mock('hono-rate-limiter', async (importOriginal) => {
       const original = await importOriginal<typeof import('hono-rate-limiter')>();
@@ -190,9 +200,9 @@ describeSuite.skip('Gateway signed URL handling', () => {
       routeConfig: { api_key: 'sk-real' },
     });
 
+    const url = `/llm/v1/chat/completions?${signed.params.toString()}`;
     const response = await request(server!)
-      .post('/llm/v1/chat/completions')
-      .query(Object.fromEntries(signed.params.entries()))
+      .post(url)
       .send({ model: 'gpt-4o-mini' });
 
     expect(response.status).toBe(500);
