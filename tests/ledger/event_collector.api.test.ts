@@ -83,7 +83,7 @@ describeSuite('Event Collector API', () => {
       .post('/events')
       .send({
         run_id: 'f2d1b08a-78da-40a0-a1a3-b47da33d5a6b',
-        user_id: 'user-abc',
+        user_id: '12345678-1234-1234-1234-123456789abc',
         outcome: 'success',
         action_type: 'chat_completion'
       });
@@ -94,8 +94,8 @@ describeSuite('Event Collector API', () => {
   });
 
   it.each([
-    { body: { user_id: 'user-abc', outcome: 'success' }, message: /run_id/i },
-    { body: { run_id: 'not-a-uuid', user_id: 'user-abc', outcome: 'success' }, message: /uuid/i },
+    { body: { user_id: '12345678-1234-1234-1234-123456789abc', outcome: 'success' }, message: /run_id/i },
+    { body: { run_id: 'not-a-uuid', user_id: '12345678-1234-1234-1234-123456789abc', outcome: 'success' }, message: /uuid/i },
   ])('rejects invalid body ($body)', async ({ body, message }) => {
     const response = await request(server!).post('/events').send(body);
     expect(response.status).toBe(400);
@@ -116,7 +116,7 @@ describeSuite('Event Collector API', () => {
     const req = agent.post('/events')
       .send({
         run_id: 'a2d1b08a-78da-40a0-a1a3-b47da33d5a6c',
-        user_id: 'user-def',
+        user_id: '12345678-1234-1234-1234-123456789def',
         outcome: 'success',
       });
 

@@ -1,5 +1,9 @@
 import { Buffer } from 'node:buffer';
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
+
+// Disable rate limiting for tests
+process.env.DISABLE_RATE_LIMITING = 'true';
+
 import app from '../../apps/gateway/src/app';
 import portkeyApp from '../../vendor/portkey-gateway/src/index';
 import { createSignedUrl } from '@stringcost/shared/signedUrl';

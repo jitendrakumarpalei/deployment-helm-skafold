@@ -3,6 +3,10 @@ import request from 'supertest';
 import { createAdaptorServer } from '@hono/node-server';
 import { Pool } from 'pg';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
+
+// Disable rate limiting for tests
+process.env.DISABLE_RATE_LIMITING = 'true';
+
 import gatewayApp from '../../apps/gateway/src/app';
 import { createSignedUrl } from '@stringcost/shared/signedUrl';
 import { runMigrations as runControlPlaneMigrations } from '../../apps/control-plane/src/migrate';
