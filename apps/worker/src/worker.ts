@@ -81,9 +81,9 @@ async function processJobs(
   }
 }
 
-export async function runWorkerOnce(): Promise<void> {
+export async function runWorkerOnce(existingPool?: Pool): Promise<void> {
   const config = loadConfig();
-  const pool = new Pool({
+  const pool = existingPool ?? new Pool({
     connectionString: config.databaseUrl,
     max: 5,
     idleTimeoutMillis: 30000,
@@ -98,7 +98,9 @@ export async function runWorkerOnce(): Promise<void> {
   try {
     await processJobs(queue, pool, config);
   } finally {
-    await pool.end();
+    if (!existingPool) {
+      await pool.end();
+    }
   }
 }
 

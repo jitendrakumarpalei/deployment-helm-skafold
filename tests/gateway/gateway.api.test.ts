@@ -117,4 +117,70 @@ describeSuite('Gateway signed URL handling', () => {
     expect(res2.status).toBe(409);
     expect(res2.body.message).toContain('replay');
   });
+
+  it('rejects requests that exceed the rate limit', async () => {
+    // Temporarily lower the rate limit for this test
+    vi.mock('hono-rate-limiter', async (importOriginal) => {
+      const original = await importOriginal<typeof import('hono-rate-limiter')>();
+      return {
+        ...original,
+        rateLimiter: (options: any) => original.rateLimiter({ ...options, max: 5 }),
+      };
+    });
+
+    const agent = request.agent(server!);
+    for (let i = 0; i < 5; i++) {
+      const signed = createSignedUrl({
+        method: 'POST',
+        host: serverHost!,
+        path: '/v1/chat/completions',
+        clientId: 'client-ratelimit-test',
+        provider: 'openai',
+        routeConfig: { api_key: 'sk-real' },
+      });
+      const res = await agent.post('/llm/v1/chat/completions')
+        .query(Object.fromEntries(signed.params.entries()))
+        .send({ model: 'gpt-4o-mini' });
+      expect(res.status).toBe(200);
+    }
+
+    const signed = createSignedUrl({
+      method: 'POST',
+      host: serverHost!,
+      path: '/v1/chat/completions',
+      clientId: 'client-ratelimit-test',
+      provider: 'openai',
+      routeConfig: { api_key: 'sk-real' },
+    });
+    const finalResponse = await agent.post('/llm/v1/chat/completions')
+      .query(Object.fromEntries(signed.params.entries()))
+      .send({ model: 'gpt-4o-mini' });
+
+    expect(finalResponse.status).toBe(429);
+    vi.unmock('hono-rate-limiter');
+  }, { timeout: 20000 });
+
+  it('returns a timeout error if portkey is too slow', async () => {
+    vi.spyOn(global, 'fetch').mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 31000)); // Exceed 30s timeout
+      return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+    });
+
+    const signed = createSignedUrl({
+      method: 'POST',
+      host: serverHost!,
+      path: '/v1/chat/completions',
+      clientId: 'client-timeout-test',
+      provider: 'openai',
+      routeConfig: { api_key: 'sk-real' },
+    });
+
+    const response = await request(server!)
+      .post('/llm/v1/chat/completions')
+      .query(Object.fromEntries(signed.params.entries()))
+      .send({ model: 'gpt-4o-mini' });
+
+    expect(response.status).toBe(500);
+    expect(response.body.message).toContain('timed out');
+  }, 40000);
 });

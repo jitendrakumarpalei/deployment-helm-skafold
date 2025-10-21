@@ -5,10 +5,20 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { Client } from 'pg';
 import { runMigrations } from '../../apps/ledger/src/migrate';
 import { runLedgerSeeds } from '../helpers/seeds';
-import eventCollectorApp from '../../apps/event-collector/src/server';
 
 const canListen = process.env.CI === 'true' && process.env.ENABLE_SUPERTEST === 'true';
 const describeSuite = canListen ? describe : describe.skip;
+
+// Set a dummy DATABASE_URL before any imports to satisfy createPool
+// Since this test suite is skipped (canListen is false in non-CI), this allows the module to import without error
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = 'postgresql://dummy:dummy@localhost:5432/dummy';
+}
+process.env.DISABLE_RATE_LIMITING = 'true';
+
+// Dynamically import to ensure env vars are set first
+const eventCollectorAppPromise = import('../../apps/event-collector/src/server');
+let eventCollectorApp: any;
 
 let pgContainer: PostgreSqlContainer | undefined;
 let connectionString: string;
@@ -22,6 +32,9 @@ async function resetDatabase(url: string) {
 }
 
 beforeAll(async () => {
+  const module = await eventCollectorAppPromise;
+  eventCollectorApp = module.default;
+
   if (process.env.TEST_DATABASE_URL) {
     connectionString = process.env.TEST_DATABASE_URL;
   } else {
@@ -95,7 +108,7 @@ describeSuite('Event Collector API', () => {
       const original = await importOriginal<typeof import('hono-rate-limiter')>();
       return {
         ...original,
-        rateLimit: (options: any) => original.rateLimit({ ...options, max: 5 }),
+        rateLimiter: (options: any) => original.rateLimiter({ ...options, max: 5 }),
       };
     });
 

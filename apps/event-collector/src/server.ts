@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import { LedgerRepository, createPool, enqueueClassificationJob } from './db.js';
 import type { LedgerEventInsert } from './db.js';
-import { rateLimit } from 'hono-rate-limiter';
+import { rateLimiter } from 'hono-rate-limiter';
 import { PostgresStore } from '@acpr/rate-limit-postgresql';
 
 const eventSchema = z.object({
@@ -24,16 +24,18 @@ const collectorRoutes = new Hono();
 export const dbPool = createPool();
 const ledgerRepo = new LedgerRepository(dbPool);
 
-const limiter = rateLimit({
+const limiter = (process.env.DATABASE_URL && process.env.DISABLE_RATE_LIMITING !== 'true') ? rateLimiter({
   store: new PostgresStore({
     connectionString: process.env.DATABASE_URL,
   }),
   windowMs: 60 * 1000, // 1 minute
   max: 500, // 500 requests per minute
   keyGenerator: (c) => c.req.header('x-forwarded-for') ?? c.req.header('x-real-ip') ?? 'unknown',
-});
+}) : undefined;
 
-collectorRoutes.use('*', limiter);
+if (limiter) {
+  collectorRoutes.use('*', limiter);
+}
 
 collectorRoutes.get('/healthz', (c) => c.json({ status: 'ok' }));
 collectorRoutes.get('/readyz', async (c) => {
@@ -63,8 +65,6 @@ collectorRoutes.post('/', zValidator('json', eventSchema), createHandler);
 collectorRoutes.post('', zValidator('json', eventSchema), createHandler);
 
 import { cors } from 'hono/cors';
-
-// ... (keep existing imports)
 
 const app = new Hono();
 

@@ -4,23 +4,16 @@ import portkeyApp from '../../../vendor/portkey-gateway/src/index';
 import { adaptResponse } from './middleware/responseAdapter';
 import { createForwardRequest } from './middleware/requestAdapter';
 import { verifySignedRequest, type VerifiedSignedRequest } from '@stringcost/shared/signedUrl';
-import { assertNonce } from './replayStore';
-import { rateLimit } from 'hono-rate-limiter';
+import { assertNonce, pool as replayStorePool } from './replayStore';
+import { rateLimiter } from 'hono-rate-limiter';
 import { PostgresStore } from '@acpr/rate-limit-postgresql';
-
 import { cors } from 'hono/cors';
-
-// ... (keep existing imports)
 
 const app = new Hono<{ Variables: { verified: VerifiedSignedRequest } }>();
 
 app.use('*', cors({
   origin: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000').split(','),
 }));
-
-import { pool as replayStorePool } from './replayStore';
-
-// ... (keep existing imports)
 
 app.get('/healthz', (c) => c.json({ status: 'ok' }));
 app.get('/readyz', async (c) => {
@@ -72,14 +65,14 @@ const verifySignedUrlMiddleware = async (c: Context, next: () => Promise<void>) 
   await next();
 };
 
-const llmLimiter = rateLimit({
+const llmLimiter = (process.env.DATABASE_URL && process.env.DISABLE_RATE_LIMITING !== 'true') ? rateLimiter({
   store: new PostgresStore({
     connectionString: process.env.DATABASE_URL,
   }),
   windowMs: 60 * 1000, // 1 minute
   max: 1000, // 1000 requests per minute
   keyGenerator: (c) => c.get('verified')?.clientId ?? 'unknown',
-});
+}) : undefined;
 
 
 const handlePortkey = async (c: Context) => {
@@ -163,8 +156,13 @@ const handlePortkey = async (c: Context) => {
   return adaptResponse(response);
 };
 
-app.use('/llm', verifySignedUrlMiddleware, llmLimiter);
-app.use('/llm/*', verifySignedUrlMiddleware, llmLimiter);
+if (llmLimiter) {
+  app.use('/llm', verifySignedUrlMiddleware, llmLimiter);
+  app.use('/llm/*', verifySignedUrlMiddleware, llmLimiter);
+} else {
+  app.use('/llm', verifySignedUrlMiddleware);
+  app.use('/llm/*', verifySignedUrlMiddleware);
+}
 app.all('/llm', handlePortkey);
 app.all('/llm/*', handlePortkey);
 

@@ -32,6 +32,7 @@ beforeAll(async () => {
   await resetDatabase(connectionString);
 
   process.env.DATABASE_URL = connectionString;
+  process.env.DISABLE_RATE_LIMITING = 'true';
   await runMigrations({ databaseUrl: connectionString });
   await runLedgerSeeds(connectionString);
 
@@ -58,7 +59,7 @@ describe('Event Collector API', () => {
       },
       body: JSON.stringify({
         run_id: 'f2d1b08a-78da-40a0-a1a3-b47da33d5a6b',
-        user_id: 'user-abc',
+        user_id: '12345678-1234-1234-1234-123456789abc',
         outcome: 'success',
         action_type: 'chat_completion'
       })

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import { getPool } from './db.js';
 import { createSignedUrl } from '@stringcost/shared/signedUrl';
-import { rateLimit } from 'hono-rate-limiter';
+import { rateLimiter } from 'hono-rate-limiter';
 import { PostgresStore } from '@acpr/rate-limit-postgresql';
 
 const controlRoutes = new Hono();
@@ -31,14 +31,14 @@ function extractApiKey(c: any): string | null {
   return c.req.header('x-stringcost-api-key') || null;
 }
 
-const presignLimiter = rateLimit({
+const presignLimiter = (process.env.DATABASE_URL && process.env.DISABLE_RATE_LIMITING !== 'true') ? rateLimiter({
   store: new PostgresStore({
     connectionString: process.env.DATABASE_URL,
   }),
   windowMs: 60 * 1000, // 1 minute
   max: 100, // 100 requests per minute
   keyGenerator: (c) => extractApiKey(c) ?? c.req.header('x-forwarded-for') ?? c.req.header('x-real-ip') ?? 'unknown',
-});
+}) : undefined;
 
 interface ProviderModelRow {
   provider: string;
@@ -188,7 +188,7 @@ function resolveGatewayBase(): string {
 
 controlRoutes.post(
   '/v1/presign',
-  presignLimiter,
+  ...(presignLimiter ? [presignLimiter] : []),
   zValidator('json', presignRequestSchema),
   async (c) => {
     const apiKey = extractApiKey(c);
