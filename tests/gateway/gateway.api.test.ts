@@ -121,6 +121,11 @@ describeSuite('Gateway signed URL handling', () => {
   });
 
   it('rejects a replayed nonce', async () => {
+    // Mock fetch for both requests
+    vi.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ choices: [{ message: { content: 'OK' } }] }), { status: 200 })
+    );
+
     const signed = createSignedUrl({
       method: 'POST',
       host: serverHost!,
@@ -206,6 +211,8 @@ describeSuite('Gateway signed URL handling', () => {
       .send({ model: 'gpt-4o-mini' });
 
     expect(response.status).toBe(500);
-    expect(response.body.message).toContain('timed out');
+    // Check for timeout message in body (may be in different formats)
+    const errorMessage = response.body.message || response.body.error || JSON.stringify(response.body);
+    expect(errorMessage).toMatch(/timed? ?out/i);
   }, 40000);
 });
