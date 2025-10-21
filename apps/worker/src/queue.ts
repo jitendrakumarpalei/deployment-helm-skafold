@@ -79,4 +79,23 @@ export class ClassificationQueue {
       [jobId]
     );
   }
+
+  async moveToDLQ(job: ClassificationJob, error: Error): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO classification_jobs_failed (original_job_id, log_id, prompt_content, attempts, error_details)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [job.job_id, job.log_id, job.prompt_content, job.attempts, { message: error.message, stack: error.stack }]
+      );
+      await client.query('DELETE FROM classification_jobs WHERE job_id = $1', [job.job_id]);
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
 }

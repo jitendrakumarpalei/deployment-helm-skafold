@@ -64,6 +64,18 @@ afterAll(async () => {
 });
 
 describeSuite('Control plane presign API', () => {
+  it('returns ok for /healthz', async () => {
+    if (skipTest) return;
+    const response = await request(server!).get('/healthz');
+    expect(response.status).toBe(200);
+  });
+
+  it('returns ready for /readyz when db is connected', async () => {
+    if (skipTest) return;
+    const response = await request(server!).get('/readyz');
+    expect(response.status).toBe(200);
+  });
+
   it('issues a signed URL for chat completions', async () => {
     if (skipTest) {
       return;
@@ -92,4 +104,72 @@ describeSuite('Control plane presign API', () => {
     expect(response.body).toHaveProperty('nonce');
     expect(response.body).toHaveProperty('expires_at');
   });
+
+  it('returns CORS headers for allowed origins', async () => {
+    if (skipTest) return;
+    process.env.ALLOWED_ORIGINS = 'http://test.local';
+    const response = await request(server!)
+      .post('/control/v1/presign')
+      .set('Authorization', 'Bearer sk-stringcost-demo')
+      .set('Origin', 'http://test.local')
+      .send({ path: '/v1/chat/completions', provider: 'openai' });
+
+    expect(response.status).toBe(200);
+    expect(response.headers['access-control-allow-origin']).toBe('http://test.local');
+  });
+
+  it('is protected against SQL injection', async () => {
+    if (skipTest) return;
+    const response = await request(server!)
+      .post('/control/v1/presign')
+      .set('Authorization', 'Bearer sk-stringcost-demo')
+      .send({
+        path: '/v1/chat/completions',
+        virtual_key: "' OR 1=1; --",
+      });
+
+    expect(response.status).toBe(404);
+  });
+
+  it.each([
+    { body: { provider: 'openai' }, message: /path/i },
+    { body: { path: '/v1/chat/completions', run_id: 'not-a-uuid' }, message: /uuid/i },
+    { body: { path: '/v1/chat/completions', metadata: { a: 'b'.repeat(70000) } }, message: /Metadata/i },
+  ])('rejects invalid body ($body)', async ({ body, message }) => {
+    if (skipTest) return;
+    const response = await request(server!)
+      .post('/control/v1/presign')
+      .set('Authorization', 'Bearer sk-stringcost-demo')
+      .send(body);
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toMatch(message);
+  });
+
+  it('rejects requests that exceed the rate limit', async () => {
+    if (skipTest) {
+      return;
+    }
+    if (!server) {
+      server = createAdaptorServer({ fetch: controlPlaneApp.fetch });
+      server.listen(0);
+    }
+
+    const agent = request.agent(server!);
+    const req = agent.post('/control/v1/presign')
+      .set('Authorization', 'Bearer sk-stringcost-test-ratelimit')
+      .send({
+        provider: 'openai',
+        method: 'POST',
+        path: '/v1/chat/completions',
+      });
+
+    // Exceed the rate limit (100 req/min)
+    let response;
+    for (let i = 0; i < 101; i++) {
+      response = await req;
+    }
+
+    expect(response!.status).toBe(429);
+  }, { timeout: 15000 });
 });

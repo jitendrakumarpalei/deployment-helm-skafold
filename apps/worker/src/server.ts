@@ -1,3 +1,4 @@
+import { Pool } from 'pg';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { startWorker } from './worker.js';
@@ -5,9 +6,21 @@ import { startWorker } from './worker.js';
 const app = new Hono();
 const port = Number(process.env.PORT ?? 8080);
 
-let workerHandle: { stop: () => Promise<void> } | undefined;
+let workerHandle: { stop: () => Promise<void>; pool: Pool } | undefined;
 
 app.get('/healthz', (c) => c.json({ status: 'ok', workerRunning: Boolean(workerHandle) }));
+app.get('/readyz', async (c) => {
+  if (!workerHandle) {
+    return c.json({ status: 'not ready', message: 'Worker not started' }, 503);
+  }
+  try {
+    await workerHandle.pool.query('SELECT 1');
+    return c.json({ status: 'ready' });
+  } catch (error) {
+    console.error('Readiness check failed:', error);
+    return c.json({ status: 'not ready' }, 503);
+  }
+});
 
 startWorker()
   .then((handle) => {

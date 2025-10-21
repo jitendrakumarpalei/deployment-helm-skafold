@@ -1,25 +1,53 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
+import { z } from 'zod';
+import { zValidator } from '@hono/zod-validator';
 import { LedgerRepository, createPool, enqueueClassificationJob } from './db.js';
 import type { LedgerEventInsert } from './db.js';
+import { rateLimit } from 'hono-rate-limiter';
+import { PostgresStore } from '@acpr/rate-limit-postgresql';
 
-interface EventPayload extends LedgerEventInsert {
-  prompt_content?: string;
-}
+const eventSchema = z.object({
+  run_id: z.string().uuid(),
+  user_id: z.string().uuid(),
+  outcome: z.string(),
+  step_name: z.string().max(255).optional(),
+  action_type: z.string().max(255).optional(),
+  duration_ms: z.number().int().optional(),
+  cost_cogs_micros: z.number().int().optional(),
+  revenue_billed_micros: z.number().int().optional(),
+  prompt_content: z.string().optional(),
+});
 
 const collectorRoutes = new Hono();
 
 export const dbPool = createPool();
 const ledgerRepo = new LedgerRepository(dbPool);
 
+const limiter = rateLimit({
+  store: new PostgresStore({
+    connectionString: process.env.DATABASE_URL,
+  }),
+  windowMs: 60 * 1000, // 1 minute
+  max: 500, // 500 requests per minute
+  keyGenerator: (c) => c.req.header('x-forwarded-for') ?? c.req.header('x-real-ip') ?? 'unknown',
+});
+
+collectorRoutes.use('*', limiter);
+
 collectorRoutes.get('/healthz', (c) => c.json({ status: 'ok' }));
+collectorRoutes.get('/readyz', async (c) => {
+  try {
+    await dbPool.query('SELECT 1');
+    return c.json({ status: 'ready' });
+  } catch (error) {
+    console.error('Readiness check failed:', error);
+    return c.json({ status: 'not ready' }, 503);
+  }
+});
 
 const createHandler = async (c: Context) => {
-  const payload = await c.req.json<EventPayload>();
-
-  if (!payload.run_id || !payload.user_id || !payload.outcome) {
-    return c.json({ message: 'run_id, user_id and outcome are required' }, 400);
-  }
+  const payload = c.req.valid('json');
 
   const record = await ledgerRepo.insertEvent(payload);
 
@@ -31,10 +59,19 @@ const createHandler = async (c: Context) => {
   return c.json(record, 201);
 };
 
-collectorRoutes.post('/', createHandler);
-collectorRoutes.post('', createHandler);
+collectorRoutes.post('/', zValidator('json', eventSchema), createHandler);
+collectorRoutes.post('', zValidator('json', eventSchema), createHandler);
+
+import { cors } from 'hono/cors';
+
+// ... (keep existing imports)
 
 const app = new Hono();
+
+app.use('*', cors({
+  origin: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000').split(','),
+}));
+
 app.route('/', collectorRoutes);
 app.route('/events', collectorRoutes);
 

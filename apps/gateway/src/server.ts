@@ -1,17 +1,19 @@
 import { serve } from '@hono/node-server';
 import app from './app';
+import { closeReplayStorePool } from './replayStore';
 
 const port = Number(process.env.PORT ?? 8787);
 
-try {
-  serve({
-    fetch: app.fetch,
-    port,
-  });
+const server = serve({
+  fetch: app.fetch,
+  port,
+});
 
-  console.log(`StringCost gateway listening on http://localhost:${port}/llm`);
-} catch (error: unknown) {
-  const err = error instanceof Error ? error : new Error(String(error));
-  console.error('Failed to start gateway server', err);
-  process.exit(1);
-}
+console.log(`StringCost gateway listening on http://localhost:${port}/llm`);
+
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, closing connections...');
+  await closeReplayStorePool();
+  server.close();
+  process.exit(0);
+});

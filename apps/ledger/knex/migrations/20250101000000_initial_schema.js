@@ -1,3 +1,9 @@
+/**
+ * Initial schema setup for the ledger.
+ *
+ * This migration is safe to run as it only creates new tables and does not
+ * modify existing data. All `notNullable` columns have default values.
+ */
 export async function up(knex) {
   await knex.raw('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
   await knex.raw('CREATE EXTENSION IF NOT EXISTS "btree_gist"');

@@ -1,10 +1,24 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
+import { zValidator } from '@hono/zod-validator';
 import { getPool } from './db.js';
 import { createSignedUrl } from '@stringcost/shared/signedUrl';
+import { rateLimit } from 'hono-rate-limiter';
+import { PostgresStore } from '@acpr/rate-limit-postgresql';
 
 const controlRoutes = new Hono();
 
 controlRoutes.get('/healthz', (c) => c.json({ status: 'ok' }));
+controlRoutes.get('/readyz', async (c) => {
+  try {
+    const pool = getPool();
+    await pool.query('SELECT 1');
+    return c.json({ status: 'ready' });
+  } catch (error) {
+    console.error('Readiness check failed:', error);
+    return c.json({ status: 'not ready' }, 503);
+  }
+});
 
 function extractApiKey(c: any): string | null {
   const auth = c.req.header('authorization') || '';
@@ -16,6 +30,15 @@ function extractApiKey(c: any): string | null {
   }
   return c.req.header('x-stringcost-api-key') || null;
 }
+
+const presignLimiter = rateLimit({
+  store: new PostgresStore({
+    connectionString: process.env.DATABASE_URL,
+  }),
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per minute
+  keyGenerator: (c) => extractApiKey(c) ?? c.req.header('x-forwarded-for') ?? c.req.header('x-real-ip') ?? 'unknown',
+});
 
 interface ProviderModelRow {
   provider: string;
@@ -101,21 +124,22 @@ controlRoutes.get('/v1/account/config', async (c) => {
   }
   const clientId = clientResult.rows[0].id;
 
-  const credentialResult = await pool.query<ProviderCredentialRow>(
-    `SELECT provider, virtual_key, provider_api_key, metadata
-       FROM provider_credentials
-      WHERE api_client_id = $1
-        AND ($2::text IS NULL OR provider = $2)
-      ORDER BY created_at ASC
-      LIMIT 1`,
-    [clientId, providerFilter ?? null]
-  );
+  const knex = (await import('./knex.js')).default;
+  const query = knex('provider_credentials')
+    .select('provider', 'virtual_key', 'provider_api_key', 'metadata')
+    .where('api_client_id', clientId)
+    .orderBy('created_at', 'asc');
 
-  if (credentialResult.rows.length === 0) {
+  if (providerFilter) {
+    query.andWhere('provider', providerFilter);
+  }
+
+  const cred = await query.first<ProviderCredentialRow>();
+
+  if (!cred) {
     return c.json({ message: 'No provider configured' }, 404);
   }
 
-  const cred = credentialResult.rows[0];
   const config = {
     provider: cred.provider,
     virtual_key: cred.virtual_key,
@@ -128,28 +152,24 @@ controlRoutes.get('/v1/account/config', async (c) => {
   return c.json({ provider: cred.provider, config });
 });
 
-interface PresignRequestBody {
-  method?: string;
-  path: string;
-  provider?: string;
-  virtual_key?: string;
-  run_id?: string;
-  user_id?: string;
-  metadata?: Record<string, unknown>;
-  body_sha256?: string;
-  expires_in?: number;
-  config?: Record<string, unknown>;
-  session_id?: string;
-  scope?: string;
-  nonce?: string;
-}
-
-function sanitizeMetadata(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
+const presignRequestSchema = z.object({
+  method: z.string().optional().default('POST'),
+  path: z.string().min(1).max(2048),
+  provider: z.string().optional(),
+  virtual_key: z.string().optional(),
+  run_id: z.string().uuid().optional(),
+  user_id: z.string().uuid().optional(),
+  metadata: z.record(z.unknown()).optional().refine((val) => {
+    if (!val) return true;
+    return JSON.stringify(val).length < 64 * 1024;
+  }, { message: 'Metadata must be less than 64KB' }),
+  body_sha256: z.string().optional(),
+  expires_in: z.number().int().optional(),
+  config: z.record(z.unknown()).optional(),
+  session_id: z.string().uuid().optional(),
+  scope: z.string().optional(),
+  nonce: z.string().uuid().optional(),
+});
 
 function normalizePath(input: string): string {
   if (!input) {
@@ -166,120 +186,122 @@ function resolveGatewayBase(): string {
   return base.replace(/\/+$/u, '');
 }
 
-controlRoutes.post('/v1/presign', async (c) => {
-  const apiKey = extractApiKey(c);
-  if (!apiKey) {
-    return c.json({ message: 'Missing API key' }, 401);
-  }
-
-  const body = (await c.req.json()) as PresignRequestBody;
-  const method = (body.method ?? 'POST').toUpperCase();
-  let path: string;
-  try {
-    path = normalizePath(body.path);
-  } catch (error) {
-    return c.json({ message: (error as Error).message }, 400);
-  }
-  const requestedProvider = body.provider;
-  const requestedVirtualKey = body.virtual_key;
-
-  const pool = getPool();
-  const clientResult = await pool.query(
-    'SELECT id FROM api_clients WHERE api_key = $1',
-    [apiKey]
-  );
-  if (clientResult.rows.length === 0) {
-    return c.json({ message: 'Invalid API key' }, 403);
-  }
-  const clientId = clientResult.rows[0].id as string;
-
-  let credentialQuery: string;
-  let credentialParams: unknown[];
-  if (requestedVirtualKey) {
-    credentialQuery = `SELECT provider, virtual_key, provider_api_key, metadata
-       FROM provider_credentials
-      WHERE api_client_id = $1
-        AND virtual_key = $2
-      LIMIT 1`;
-    credentialParams = [clientId, requestedVirtualKey];
-  } else {
-    if (!requestedProvider) {
-      return c.json({ message: 'provider or virtual_key is required' }, 400);
+controlRoutes.post(
+  '/v1/presign',
+  presignLimiter,
+  zValidator('json', presignRequestSchema),
+  async (c) => {
+    const apiKey = extractApiKey(c);
+    if (!apiKey) {
+      return c.json({ message: 'Missing API key' }, 401);
     }
-    credentialQuery = `SELECT provider, virtual_key, provider_api_key, metadata
-       FROM provider_credentials
-      WHERE api_client_id = $1
-        AND provider = $2
-      ORDER BY created_at ASC
-      LIMIT 1`;
-    credentialParams = [clientId, requestedProvider];
+
+    const body = c.req.valid('json');
+    const method = body.method.toUpperCase();
+    let path: string;
+    try {
+      path = normalizePath(body.path);
+    } catch (error) {
+      return c.json({ message: (error as Error).message }, 400);
+    }
+    const requestedProvider = body.provider;
+    const requestedVirtualKey = body.virtual_key;
+
+    const pool = getPool();
+    const clientResult = await pool.query(
+      'SELECT id FROM api_clients WHERE api_key = $1',
+      [apiKey]
+    );
+    if (clientResult.rows.length === 0) {
+      return c.json({ message: 'Invalid API key' }, 403);
+    }
+    const clientId = clientResult.rows[0].id as string;
+
+    const knex = (await import('./knex.js')).default;
+    let query = knex('provider_credentials')
+      .select('provider', 'virtual_key', 'provider_api_key', 'metadata')
+      .where('api_client_id', clientId);
+
+    if (requestedVirtualKey) {
+      query = query.andWhere('virtual_key', requestedVirtualKey);
+    } else {
+      if (!requestedProvider) {
+        return c.json({ message: 'provider or virtual_key is required' }, 400);
+      }
+      query = query.andWhere('provider', requestedProvider).orderBy('created_at', 'asc');
+    }
+
+    const cred = await query.first<ProviderCredentialRow>();
+
+    if (!cred) {
+      return c.json({ message: 'No provider configuration available' }, 404);
+    }
+
+    const overrides =
+      body.config && typeof body.config === 'object' && !Array.isArray(body.config)
+        ? body.config
+        : {};
+
+    const routeConfig: Record<string, unknown> = {
+      ...overrides,
+      provider: (overrides as Record<string, unknown>).provider ?? cred.provider,
+      api_key: cred.provider_api_key,
+      virtual_key: cred.virtual_key ?? undefined,
+      credential_metadata: cred.metadata ?? undefined,
+    };
+
+    if (typeof routeConfig.provider !== 'string') {
+      routeConfig.provider = cred.provider;
+    }
+
+    if (body.body_sha256 && !/^[a-f0-9]{64}$/iu.test(body.body_sha256)) {
+      return c.json({ message: 'body_sha256 must be a hex-encoded SHA-256 digest' }, 400);
+    }
+
+    const metadata = body.metadata;
+    const baseUrl = resolveGatewayBase();
+    const canonicalHost = new URL(baseUrl).host;
+
+    const signed = createSignedUrl({
+      method,
+      host: canonicalHost,
+      path,
+      bodyHash: body.body_sha256?.toLowerCase(),
+      clientId,
+      provider: cred.provider,
+      scope: body.scope,
+      sessionId: body.session_id,
+      runId: body.run_id,
+      userId: body.user_id,
+      metadata,
+      nonce: body.nonce,
+      expiresIn: body.expires_in,
+      routeConfig,
+    });
+
+    const presignedUrl = new URL(`${baseUrl}/llm${path}`);
+    signed.params.forEach((value: string, key: string) => presignedUrl.searchParams.set(key, value));
+
+    return c.json({
+      url: presignedUrl.toString(),
+      expires_at: signed.expiresAt,
+      session_id: signed.sessionId,
+      nonce: signed.nonce,
+      kid: signed.params.get('kid'),
+    });
   }
+);
 
-  const credentialResult = await pool.query<ProviderCredentialRow>(
-    credentialQuery,
-    credentialParams
-  );
+import { cors } from 'hono/cors';
 
-  if (credentialResult.rows.length === 0) {
-    return c.json({ message: 'No provider configuration available' }, 404);
-  }
-
-  const cred = credentialResult.rows[0];
-  const overrides =
-    body.config && typeof body.config === 'object' && !Array.isArray(body.config)
-      ? body.config
-      : {};
-
-  const routeConfig: Record<string, unknown> = {
-    ...overrides,
-    provider: (overrides as Record<string, unknown>).provider ?? cred.provider,
-    api_key: cred.provider_api_key,
-    virtual_key: cred.virtual_key ?? undefined,
-    credential_metadata: cred.metadata ?? undefined,
-  };
-
-  if (typeof routeConfig.provider !== 'string') {
-    routeConfig.provider = cred.provider;
-  }
-
-  if (body.body_sha256 && !/^[a-f0-9]{64}$/iu.test(body.body_sha256)) {
-    return c.json({ message: 'body_sha256 must be a hex-encoded SHA-256 digest' }, 400);
-  }
-
-  const metadata = sanitizeMetadata(body.metadata);
-  const baseUrl = resolveGatewayBase();
-  const canonicalHost = new URL(baseUrl).host;
-
-  const signed = createSignedUrl({
-    method,
-    host: canonicalHost,
-    path,
-    bodyHash: body.body_sha256?.toLowerCase(),
-    clientId,
-    provider: cred.provider,
-    scope: body.scope,
-    sessionId: body.session_id,
-    runId: body.run_id,
-    userId: body.user_id,
-    metadata,
-    nonce: body.nonce,
-    expiresIn: body.expires_in,
-    routeConfig,
-  });
-
-  const presignedUrl = new URL(`${baseUrl}/llm${path}`);
-  signed.params.forEach((value: string, key: string) => presignedUrl.searchParams.set(key, value));
-
-  return c.json({
-    url: presignedUrl.toString(),
-    expires_at: signed.expiresAt,
-    session_id: signed.sessionId,
-    nonce: signed.nonce,
-    kid: signed.params.get('kid'),
-  });
-});
+// ... (keep existing imports)
 
 const app = new Hono();
+
+app.use('*', cors({
+  origin: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000').split(','),
+}));
+
 app.route('/', controlRoutes);
 app.route('/control', controlRoutes);
 

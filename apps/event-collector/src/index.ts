@@ -1,10 +1,6 @@
 import { serve } from '@hono/node-server';
 import app, { dbPool } from './server.js';
 
-console.log('=== ALL ENVIRONMENT VARIABLES ===');
-console.log(JSON.stringify(process.env, null, 2));
-console.log('=== END ENV ===');
-
 const port = Number(process.env.PORT ?? 8080);
 
 process.on('SIGTERM', async () => {

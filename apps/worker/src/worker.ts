@@ -17,10 +17,14 @@ async function updateLedgerActionType(
   );
 }
 
-export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
+export async function startWorker(): Promise<{ stop: () => Promise<void>; pool: Pool }> {
   const config = loadConfig();
-
-  const pool = new Pool({ connectionString: config.databaseUrl });
+  const pool = new Pool({
+    connectionString: config.databaseUrl,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
   const queue = new ClassificationQueue(
     pool,
     config.reservationTimeoutMs,
@@ -37,6 +41,7 @@ export async function startWorker(): Promise<{ stop: () => Promise<void> }> {
       clearInterval(timer);
       await pool.end();
     },
+    pool,
   };
 }
 
@@ -51,6 +56,7 @@ async function processJobs(
   }
 
   const completedJobIds: number[] = [];
+  const maxAttempts = 5;
   for (const job of jobs) {
     try {
       const classification = await classifyPrompt(
@@ -62,7 +68,11 @@ async function processJobs(
       completedJobIds.push(job.job_id);
     } catch (error) {
       console.error('Failed to classify job', job.log_id, error);
-      await queue.release(job.job_id);
+      if (job.attempts >= maxAttempts) {
+        await queue.moveToDLQ(job, error as Error);
+      } else {
+        await queue.release(job.job_id);
+      }
     }
   }
 
@@ -73,7 +83,12 @@ async function processJobs(
 
 export async function runWorkerOnce(): Promise<void> {
   const config = loadConfig();
-  const pool = new Pool({ connectionString: config.databaseUrl });
+  const pool = new Pool({
+    connectionString: config.databaseUrl,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
   const queue = new ClassificationQueue(
     pool,
     config.reservationTimeoutMs,

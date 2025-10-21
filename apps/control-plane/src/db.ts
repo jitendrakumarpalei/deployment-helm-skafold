@@ -10,7 +10,12 @@ export function getPool(connectionString?: string): Pool {
   if (!url) {
     throw new Error('DATABASE_URL must be set to use the control plane');
   }
-  pool = new Pool({ connectionString: url });
+  pool = new Pool({
+    connectionString: url,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
   return pool;
 }
 

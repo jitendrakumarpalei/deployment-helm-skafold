@@ -83,7 +83,12 @@ export function createPool(connectionString?: string): Pool {
   if (!connection) {
     throw new Error('DATABASE_URL must be defined');
   }
-  return new Pool({ connectionString: connection });
+  return new Pool({
+    connectionString: connection,
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
 }
 
 export async function enqueueClassificationJob(

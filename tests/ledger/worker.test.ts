@@ -93,4 +93,46 @@ describe('Classification worker', () => {
 
     await worker.stop();
   }, 30_000);
+
+  it('releases a job if the classifier times out', async () => {
+    const classifierSpy = vi.spyOn(global, 'fetch' as any).mockImplementation(async () => {
+      await new Promise(resolve => setTimeout(resolve, 31000)); // Exceed 30s timeout
+      return new Response(JSON.stringify({ action_type: 'synthesis' }), { status: 200 });
+    });
+
+    const intervalSpy = vi.spyOn(global, 'setInterval').mockImplementation((fn) => {
+      void fn();
+      return 0 as unknown as NodeJS.Timeout;
+    });
+
+    const worker = await startWorker();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const remainingJobs = await pool.query('SELECT COUNT(*)::int AS count FROM classification_jobs WHERE reserved_at IS NULL');
+    expect(remainingJobs.rows[0].count).toBe(1);
+
+    expect(classifierSpy).toHaveBeenCalled();
+    await worker.stop();
+  }, 40000);
+
+  it('moves a failing job to the dead letter queue after 5 attempts', async () => {
+    const classifierSpy = vi
+      .spyOn(global, 'fetch' as any)
+      .mockResolvedValue({ ok: false, status: 500 } as Response);
+
+    // Manually run the worker 5 times to simulate retries
+    for (let i = 0; i < 5; i++) {
+      const worker = await startWorker();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await worker.stop();
+    }
+
+    const failedJobs = await pool.query('SELECT * FROM classification_jobs_failed');
+    expect(failedJobs.rowCount).toBe(1);
+    expect(failedJobs.rows[0].log_id).toBe('11111111-1111-1111-1111-111111111111');
+    expect(failedJobs.rows[0].attempts).toBe(5);
+
+    const remainingJobs = await pool.query('SELECT COUNT(*)::int AS count FROM classification_jobs');
+    expect(remainingJobs.rows[0].count).toBe(0);
+  }, 40000);
 });

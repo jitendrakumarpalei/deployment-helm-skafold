@@ -3,14 +3,41 @@ import { Hono, type Context } from 'hono';
 import portkeyApp from '../../../vendor/portkey-gateway/src/index';
 import { adaptResponse } from './middleware/responseAdapter';
 import { createForwardRequest } from './middleware/requestAdapter';
-import { verifySignedRequest } from '@stringcost/shared/signedUrl';
+import { verifySignedRequest, type VerifiedSignedRequest } from '@stringcost/shared/signedUrl';
 import { assertNonce } from './replayStore';
+import { rateLimit } from 'hono-rate-limiter';
+import { PostgresStore } from '@acpr/rate-limit-postgresql';
 
-const app = new Hono();
+import { cors } from 'hono/cors';
+
+// ... (keep existing imports)
+
+const app = new Hono<{ Variables: { verified: VerifiedSignedRequest } }>();
+
+app.use('*', cors({
+  origin: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000').split(','),
+}));
+
+import { pool as replayStorePool } from './replayStore';
+
+// ... (keep existing imports)
 
 app.get('/healthz', (c) => c.json({ status: 'ok' }));
+app.get('/readyz', async (c) => {
+  if (!replayStorePool) {
+    // In-memory store is always ready
+    return c.json({ status: 'ready' });
+  }
+  try {
+    await replayStorePool.query('SELECT 1');
+    return c.json({ status: 'ready' });
+  } catch (error) {
+    console.error('Readiness check failed:', error);
+    return c.json({ status: 'not ready' }, 503);
+  }
+});
 
-const handlePortkey = async (c: Context) => {
+const verifySignedUrlMiddleware = async (c: Context, next: () => Promise<void>) => {
   const originalRequest = c.req.raw;
   const url = new URL(originalRequest.url);
   const search = url.searchParams;
@@ -40,6 +67,24 @@ const handlePortkey = async (c: Context) => {
   } catch (error) {
     return c.json({ message: (error as Error).message || 'Signed URL replay detected' }, 409);
   }
+
+  c.set('verified', verified);
+  await next();
+};
+
+const llmLimiter = rateLimit({
+  store: new PostgresStore({
+    connectionString: process.env.DATABASE_URL,
+  }),
+  windowMs: 60 * 1000, // 1 minute
+  max: 1000, // 1000 requests per minute
+  keyGenerator: (c) => c.get('verified')?.clientId ?? 'unknown',
+});
+
+
+const handlePortkey = async (c: Context) => {
+  const verified = c.get('verified');
+  const originalRequest = c.req.raw;
 
   const forwardedHeaders = new Headers(originalRequest.headers);
   forwardedHeaders.set('x-portkey-provider', verified.provider);
@@ -101,7 +146,14 @@ const handlePortkey = async (c: Context) => {
     env = undefined;
   }
 
-  const response = await portkeyApp.fetch(forwardedRequest, env, executionCtx);
+  const timeoutPromise = new Promise<Response>((_, reject) =>
+    setTimeout(() => reject(new Error('Request to Portkey timed out')), 30000)
+  );
+
+  const response = await Promise.race([
+    portkeyApp.fetch(forwardedRequest, env, executionCtx),
+    timeoutPromise
+  ]);
   if (process.env.DEBUG_GATEWAY_FORWARD === '1') {
     const cloned = response.clone();
     const bodyText = await cloned.text();
@@ -111,6 +163,8 @@ const handlePortkey = async (c: Context) => {
   return adaptResponse(response);
 };
 
+app.use('/llm', verifySignedUrlMiddleware, llmLimiter);
+app.use('/llm/*', verifySignedUrlMiddleware, llmLimiter);
 app.all('/llm', handlePortkey);
 app.all('/llm/*', handlePortkey);
 
