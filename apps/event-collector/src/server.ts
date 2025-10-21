@@ -21,8 +21,18 @@ const eventSchema = z.object({
 
 const collectorRoutes = new Hono();
 
-export const dbPool = createPool();
-const ledgerRepo = new LedgerRepository(dbPool);
+export let dbPool = createPool();
+let ledgerRepo = new LedgerRepository(dbPool);
+
+export async function reinitializePool(connectionString: string): Promise<void> {
+  await dbPool.end();
+  dbPool = createPool(connectionString);
+  ledgerRepo = new LedgerRepository(dbPool);
+}
+
+export async function closePool(): Promise<void> {
+  await dbPool.end();
+}
 
 const limiter = (process.env.DATABASE_URL && process.env.DISABLE_RATE_LIMITING !== 'true') ? rateLimiter({
   store: new PostgresStore({

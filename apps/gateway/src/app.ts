@@ -143,17 +143,21 @@ const handlePortkey = async (c: Context) => {
     setTimeout(() => reject(new Error('Request to Portkey timed out')), 30000)
   );
 
-  const response = await Promise.race([
-    portkeyApp.fetch(forwardedRequest, env, executionCtx),
-    timeoutPromise
-  ]);
-  if (process.env.DEBUG_GATEWAY_FORWARD === '1') {
-    const cloned = response.clone();
-    const bodyText = await cloned.text();
-    console.log('Portkey response status', response.status);
-    console.log('Portkey response body', bodyText);
+  try {
+    const response = await Promise.race([
+      portkeyApp.fetch(forwardedRequest, env, executionCtx),
+      timeoutPromise
+    ]);
+    if (process.env.DEBUG_GATEWAY_FORWARD === '1') {
+      const cloned = response.clone();
+      const bodyText = await cloned.text();
+      console.log('Portkey response status', response.status);
+      console.log('Portkey response body', bodyText);
+    }
+    return adaptResponse(response);
+  } catch (error) {
+    return c.json({ message: (error as Error).message }, 500);
   }
-  return adaptResponse(response);
 };
 
 if (llmLimiter) {

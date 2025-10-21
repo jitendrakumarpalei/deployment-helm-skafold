@@ -15,6 +15,13 @@ export async function closeReplayStorePool(): Promise<void> {
   }
 }
 
+export async function initializePool(connectionString: string): Promise<void> {
+  if (pool) {
+    await pool.end();
+  }
+  pool = new Pool({ connectionString });
+}
+
 export async function assertNonce(sessionId: string, nonce: string, expiresAt: number): Promise<void> {
   const key = `${sessionId}:${nonce}`;
   const now = Math.floor(Date.now() / 1000);

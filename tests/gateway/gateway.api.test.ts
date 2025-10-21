@@ -4,10 +4,6 @@ if (!process.env.URL_TOKEN_KEY) {
 }
 // Disable rate limiting for tests
 process.env.DISABLE_RATE_LIMITING = 'true';
-// Set dummy DATABASE_URL before imports to avoid module load errors
-if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = 'postgresql://dummy:dummy@localhost:5432/dummy';
-}
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
@@ -16,6 +12,7 @@ import { Pool } from 'pg';
 import { PostgreSqlContainer } from '@testcontainers/postgresql';
 import { createSignedUrl } from '@stringcost/shared/signedUrl';
 import { runMigrations as runControlPlaneMigrations } from '../../apps/control-plane/src/migrate';
+import * as replayStore from '../../apps/gateway/src/replayStore';
 
 // Dynamically import gateway app to ensure env vars are set first
 const gatewayAppPromise = import('../../apps/gateway/src/app');
@@ -55,6 +52,9 @@ beforeAll(async () => {
   await resetDatabase(databaseUrl);
   await runControlPlaneMigrations({ databaseUrl }); // For the signed_url_replays table
 
+  // Recreate the replay store pool with the correct database URL
+  await replayStore.initializePool(databaseUrl);
+
   if (canListen) {
     server = createAdaptorServer({ fetch: gatewayApp.fetch });
     server.listen(0);
@@ -72,6 +72,7 @@ afterAll(async () => {
   if (server) {
     server.close();
   }
+  await replayStore.closeReplayStorePool();
   if (pgContainer) {
     await pgContainer.stop();
   }

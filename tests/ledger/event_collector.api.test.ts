@@ -52,6 +52,10 @@ beforeAll(async () => {
   await runMigrations({ databaseUrl: connectionString });
   await runLedgerSeeds(connectionString);
 
+  // Reinitialize the pool with the correct database URL
+  const { reinitializePool } = await import('../../apps/event-collector/src/server');
+  await reinitializePool(connectionString);
+
   if (canListen) {
     server = createAdaptorServer({ fetch: eventCollectorApp.fetch });
     server.listen(0);
@@ -62,6 +66,8 @@ afterAll(async () => {
   if (server) {
     server.close();
   }
+  const { closePool } = await import('../../apps/event-collector/src/server');
+  await closePool();
   if (pgContainer) {
     await pgContainer.stop();
   }
