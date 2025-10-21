@@ -39,6 +39,7 @@ jobs:
       TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /var/run/docker.sock
       TESTCONTAINERS_RYUK_DISABLED: true
       DISABLE_RATE_LIMITING: true
+      URL_TOKEN_KEY: Hx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8=
     steps:
       - name: Checkout
         uses: actions/checkout@v4
