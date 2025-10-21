@@ -29,6 +29,7 @@ async function resetDatabase(url: string) {
 }
 
 beforeAll(async () => {
+  process.env.DISABLE_RATE_LIMITING = 'true';
   process.env.CONTROL_PLANE_URL = CONTROL_PLANE_BASE;
   process.env.ALBUS_BASEPATH = CONTROL_PLANE_BASE;
   process.env.GATEWAY_BASE_URL = GATEWAY_BASE;
@@ -122,7 +123,7 @@ describe('LangChain → StringCost Gateway', () => {
             method,
             path: requestUrl.replace(`${GATEWAY_BASE}/llm`, '') || '/',
             run_id: runId,
-            user_id: 'user-langchain',
+            user_id: '12345678-1234-1234-1234-123456789def',
             metadata: { test: true },
             virtual_key: 'vk-openai-demo',
           }),
@@ -159,14 +160,14 @@ describe('LangChain → StringCost Gateway', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             run_id: runId,
-            user_id: 'user-langchain',
+            user_id: '12345678-1234-1234-1234-123456789def',
             outcome: 'success',
             action_type: 'chat_completion',
             prompt_content: capturedPrompt,
           }),
         });
 
-        await runWorkerOnce();
+        await runWorkerOnce(pool);
 
         return new Response(
           JSON.stringify({
