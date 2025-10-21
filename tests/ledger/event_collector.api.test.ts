@@ -89,8 +89,7 @@ describeSuite('Event Collector API', () => {
       });
 
     expect(response.status).toBe(201);
-    const body = await response.json();
-    expect(body.action_type).toBe('chat_completion');
+    expect(response.body.action_type).toBe('chat_completion');
   });
 
   it.each([

@@ -7,9 +7,17 @@ import { PostgreSqlContainer } from '@testcontainers/postgresql';
 // Disable rate limiting for tests
 process.env.DISABLE_RATE_LIMITING = 'true';
 
-import gatewayApp from '../../apps/gateway/src/app';
+// Set a dummy URL_TOKEN_KEY before import to satisfy module loading
+if (!process.env.URL_TOKEN_KEY) {
+  process.env.URL_TOKEN_KEY = Buffer.alloc(32, 99).toString('base64');
+}
+
 import { createSignedUrl } from '@stringcost/shared/signedUrl';
 import { runMigrations as runControlPlaneMigrations } from '../../apps/control-plane/src/migrate';
+
+// Dynamically import to ensure env vars are set first
+const gatewayAppPromise = import('../../apps/gateway/src/app');
+let gatewayApp: any;
 
 const canListen = process.env.CI === 'true' && process.env.ENABLE_SUPERTEST === 'true';
 const describeSuite = canListen ? describe : describe.skip;
@@ -26,6 +34,9 @@ async function resetDatabase(url: string) {
 }
 
 beforeAll(async () => {
+  const module = await gatewayAppPromise;
+  gatewayApp = module.default;
+
   process.env.URL_TOKEN_KEY = Buffer.alloc(32, 31).toString('base64');
 
   if (process.env.TEST_DATABASE_URL) {

@@ -95,8 +95,8 @@ describeSuite('Control plane presign API', () => {
         provider: 'openai',
         method: 'POST',
         path: '/v1/chat/completions',
-        run_id: 'run-test',
-        user_id: 'user-test',
+        run_id: '12345678-1234-1234-1234-123456789abc',
+        user_id: '12345678-1234-1234-1234-123456789def',
         virtual_key: 'vk-openai-demo',
         expires_in: 60,
       });
