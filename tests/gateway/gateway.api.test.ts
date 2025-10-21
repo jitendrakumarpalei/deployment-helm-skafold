@@ -99,7 +99,7 @@ describeSuite('Gateway signed URL handling', () => {
       path: '/v1/chat/completions',
       clientId: 'client-1',
       provider: 'openai',
-      routeConfig: { api_key: 'sk-real' },
+      routeConfig: { provider: 'openai', api_key: 'sk-real' },
     });
 
     // Debug: verify signed params include kid
@@ -127,7 +127,7 @@ describeSuite('Gateway signed URL handling', () => {
       path: '/v1/chat/completions',
       clientId: 'client-replay',
       provider: 'openai',
-      routeConfig: { api_key: 'sk-real' },
+      routeConfig: { provider: 'openai', api_key: 'sk-real' },
     });
 
     const url = `/llm/v1/chat/completions?${signed.params.toString()}`;
@@ -161,7 +161,7 @@ describeSuite('Gateway signed URL handling', () => {
         path: '/v1/chat/completions',
         clientId: 'client-ratelimit-test',
         provider: 'openai',
-        routeConfig: { api_key: 'sk-real' },
+        routeConfig: { provider: 'openai', api_key: 'sk-real' },
       });
       const res = await agent.post('/llm/v1/chat/completions')
         .query(Object.fromEntries(signed.params.entries()))
@@ -175,7 +175,7 @@ describeSuite('Gateway signed URL handling', () => {
       path: '/v1/chat/completions',
       clientId: 'client-ratelimit-test',
       provider: 'openai',
-      routeConfig: { api_key: 'sk-real' },
+      routeConfig: { provider: 'openai', api_key: 'sk-real' },
     });
     const finalResponse = await agent.post('/llm/v1/chat/completions')
       .query(Object.fromEntries(signed.params.entries()))
@@ -197,7 +197,7 @@ describeSuite('Gateway signed URL handling', () => {
       path: '/v1/chat/completions',
       clientId: 'client-timeout-test',
       provider: 'openai',
-      routeConfig: { api_key: 'sk-real' },
+      routeConfig: { provider: 'openai', api_key: 'sk-real' },
     });
 
     const url = `/llm/v1/chat/completions?${signed.params.toString()}`;
