@@ -1,5 +1,94 @@
 # StringCost Gateway & Billing Stack
 
+## 🏗️ Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        Client[Client Application<br/>LangChain/OpenAI SDK]
+    end
+
+    subgraph "External Services"
+        OpenAI[OpenAI API]
+        Anthropic[Anthropic API]
+        Other[Other LLM Providers]
+    end
+
+    subgraph "GKE Cluster / Cloud Run"
+        subgraph "Gateway Service :8787"
+            Gateway[Gateway<br/>apps/gateway<br/>Rate Limited]
+            Portkey[Vendored Portkey<br/>vendor/portkey-gateway<br/>In-Process]
+            ReplayStore[(Replay Store<br/>signed_url_replays)]
+        end
+
+        subgraph "Control Plane :8788"
+            ControlPlane[Control Plane<br/>apps/control-plane<br/>Rate Limited]
+            CredStore[(Credentials DB<br/>provider_credentials<br/>api_clients)]
+        end
+
+        subgraph "Event Collector :8789"
+            EventCollector[Event Collector<br/>apps/event-collector<br/>Rate Limited]
+            ClassQueue[(Classification Queue<br/>classification_jobs<br/>UNLOGGED)]
+        end
+
+        subgraph "Background Worker"
+            Worker[Worker<br/>apps/worker<br/>Poll Every 200ms]
+            Classifier[Meta Classifier API]
+        end
+
+        subgraph "Shared Database"
+            Postgres[(PostgreSQL 16<br/>Ledger + Control + Replays)]
+        end
+    end
+
+    %% Client Flow
+    Client -->|1. POST /control/v1/presign<br/>Bearer sk-stringcost-xxx| ControlPlane
+    ControlPlane -->|Read credentials| CredStore
+    ControlPlane -->|Read/verify client| CredStore
+    ControlPlane -.->|2. Return signed URL<br/>+ encrypted config| Client
+
+    Client -->|3. POST signed URL<br/>Bearer sk-openai-xxx| Gateway
+    Gateway -->|Verify signature<br/>Check replay| ReplayStore
+    Gateway -->|Decrypt config<br/>Forward request| Portkey
+
+    Portkey -->|Proxy to provider| OpenAI
+    Portkey -->|Proxy to provider| Anthropic
+    Portkey -->|Proxy to provider| Other
+
+    Portkey -.->|Provider response| Gateway
+    Gateway -.->|4. Return response| Client
+    Gateway -->|5. POST /events<br/>Write ledger event| EventCollector
+
+    %% Event Processing
+    EventCollector -->|Insert event| Postgres
+    EventCollector -->|Enqueue job| ClassQueue
+
+    Worker -->|Poll queue| ClassQueue
+    Worker -->|Classify prompt| Classifier
+    Classifier -.->|action_type| Worker
+    Worker -->|Update event| Postgres
+
+    %% Database connections
+    CredStore -.-> Postgres
+    ReplayStore -.-> Postgres
+    ClassQueue -.-> Postgres
+
+    %% Styling
+    classDef clientStyle fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef serviceStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef dbStyle fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef externalStyle fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef workerStyle fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+
+    class Client clientStyle
+    class Gateway,ControlPlane,EventCollector,Portkey serviceStyle
+    class Postgres,CredStore,ReplayStore,ClassQueue dbStyle
+    class OpenAI,Anthropic,Other,Classifier externalStyle
+    class Worker workerStyle
+```
+
+## 📋 Service Summary
+
 This repository vendors the [Portkey](https://github.com/Portkey-AI/gateway) gateway and wraps it with the StringCost control plane, event collector, and billing ledger. The wrapper keeps Portkey unmodified while exposing brand-neutral APIs (`/llm/*`, `/control/*`, `/events/*`) and feeding usage data into our double-entry ledger.
 
 - **Gateway** (`apps/gateway`) – Hono app that authenticates requests, fetches provider configuration from the control plane, normalises it into the Portkey format, then calls the vendored gateway in-process. All public endpoints live under `/llm/v1/*`.
