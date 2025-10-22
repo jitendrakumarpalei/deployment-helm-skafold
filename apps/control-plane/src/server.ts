@@ -157,6 +157,8 @@ const presignRequestSchema = z.object({
   path: z.string().min(1).max(2048),
   provider: z.string().optional(),
   virtual_key: z.string().optional(),
+  client_api_key: z.string().optional(), // Client provides their own API key (stored temporarily)
+  client_key_ttl: z.number().int().min(60).max(86400).optional().default(3600), // TTL for client key (1 hour default, max 24 hours)
   run_id: z.string().uuid().optional(),
   user_id: z.string().uuid().optional(),
   metadata: z.record(z.unknown()).optional().refine((val) => {
@@ -206,6 +208,8 @@ controlRoutes.post(
     }
     const requestedProvider = body.provider;
     const requestedVirtualKey = body.virtual_key;
+    const clientApiKey = body.client_api_key;
+    const clientKeyTtl = body.client_key_ttl || 3600;
 
     const pool = getPool();
     const clientResult = await pool.query(
@@ -217,24 +221,61 @@ controlRoutes.post(
     }
     const clientId = clientResult.rows[0].id as string;
 
-    const knex = (await import('./knex.js')).default;
-    let query = knex('provider_credentials')
-      .select('provider', 'virtual_key', 'provider_api_key', 'metadata')
-      .where('api_client_id', clientId);
+    let provider: string;
+    let providerApiKey: string;
+    let virtualKey: string | undefined;
+    let metadata: Record<string, unknown> | undefined;
 
-    if (requestedVirtualKey) {
-      query = query.andWhere('virtual_key', requestedVirtualKey);
-    } else {
+    // If client provides their own API key, store it temporarily
+    if (clientApiKey) {
       if (!requestedProvider) {
-        return c.json({ message: 'provider or virtual_key is required' }, 400);
+        return c.json({ message: 'provider is required when using client_api_key' }, 400);
       }
-      query = query.andWhere('provider', requestedProvider).orderBy('created_at', 'asc');
-    }
+      provider = requestedProvider;
 
-    const cred = await query.first<ProviderCredentialRow>();
+      // Encrypt and store the client API key temporarily
+      const expiresAt = new Date(Date.now() + clientKeyTtl * 1000);
+      const encryptionKey = process.env.DATABASE_ENCRYPTION_KEY || 'default-encryption-key-change-in-production';
 
-    if (!cred) {
-      return c.json({ message: 'No provider configuration available' }, 404);
+      const insertResult = await pool.query(
+        `INSERT INTO client_api_keys (api_client_id, provider, encrypted_key, expires_at)
+         VALUES ($1, $2, pgp_sym_encrypt($3, $4), $5)
+         RETURNING id`,
+        [clientId, provider, clientApiKey, encryptionKey, expiresAt]
+      );
+
+      const storedKeyId = insertResult.rows[0].id;
+
+      // Use a reference ID as the virtual key
+      virtualKey = `client-key-${storedKeyId}`;
+      providerApiKey = clientApiKey;
+      metadata = { client_provided: true, key_id: storedKeyId, expires_at: expiresAt.toISOString() };
+    } else {
+      // Use stored credentials
+      const knex = (await import('./knex.js')).default;
+      let query = knex('provider_credentials')
+        .select('provider', 'virtual_key', 'provider_api_key', 'metadata')
+        .where('api_client_id', clientId);
+
+      if (requestedVirtualKey) {
+        query = query.andWhere('virtual_key', requestedVirtualKey);
+      } else {
+        if (!requestedProvider) {
+          return c.json({ message: 'provider or virtual_key is required' }, 400);
+        }
+        query = query.andWhere('provider', requestedProvider).orderBy('created_at', 'asc');
+      }
+
+      const cred = await query.first<ProviderCredentialRow>();
+
+      if (!cred) {
+        return c.json({ message: 'No provider configuration available' }, 404);
+      }
+
+      provider = cred.provider;
+      providerApiKey = cred.provider_api_key;
+      virtualKey = cred.virtual_key;
+      metadata = cred.metadata as Record<string, unknown> | undefined;
     }
 
     const overrides =
@@ -244,21 +285,21 @@ controlRoutes.post(
 
     const routeConfig: Record<string, unknown> = {
       ...overrides,
-      provider: (overrides as Record<string, unknown>).provider ?? cred.provider,
-      api_key: cred.provider_api_key,
-      virtual_key: cred.virtual_key ?? undefined,
-      credential_metadata: cred.metadata ?? undefined,
+      provider: (overrides as Record<string, unknown>).provider ?? provider,
+      api_key: providerApiKey,
+      virtual_key: virtualKey ?? undefined,
+      credential_metadata: metadata ?? undefined,
     };
 
     if (typeof routeConfig.provider !== 'string') {
-      routeConfig.provider = cred.provider;
+      routeConfig.provider = provider;
     }
 
     if (body.body_sha256 && !/^[a-f0-9]{64}$/iu.test(body.body_sha256)) {
       return c.json({ message: 'body_sha256 must be a hex-encoded SHA-256 digest' }, 400);
     }
 
-    const metadata = body.metadata;
+    const requestMetadata = body.metadata;
     const baseUrl = resolveGatewayBase();
     const canonicalHost = new URL(baseUrl).host;
 
@@ -268,12 +309,12 @@ controlRoutes.post(
       path,
       bodyHash: body.body_sha256?.toLowerCase(),
       clientId,
-      provider: cred.provider,
+      provider,
       scope: body.scope,
       sessionId: body.session_id,
       runId: body.run_id,
       userId: body.user_id,
-      metadata,
+      metadata: requestMetadata,
       nonce: body.nonce,
       expiresIn: body.expires_in,
       routeConfig,

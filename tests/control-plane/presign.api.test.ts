@@ -181,4 +181,132 @@ describeSuite('Control plane presign API', () => {
 
     expect(response!.status).toBe(429);
   }, { timeout: 15000 });
+
+  it('presigns with client-provided Gemini API key', async () => {
+    if (skipTest) return;
+    const response = await request(server!)
+      .post('/control/v1/presign')
+      .set('Authorization', 'Bearer sk-stringcost-demo')
+      .send({
+        provider: 'google',
+        method: 'POST',
+        path: '/v1/chat/completions',
+        client_api_key: 'AIzaSyTestGeminiKey123',
+        client_key_ttl: 3600,
+        run_id: '12345678-1234-1234-1234-123456789abc',
+        user_id: '12345678-1234-1234-1234-123456789def',
+        config: {
+          model: 'gemini-1.5-flash'
+        },
+        expires_in: 60,
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toHaveProperty('url');
+    expect(response.body).toHaveProperty('session_id');
+    expect(response.body).toHaveProperty('nonce');
+    expect(response.body).toHaveProperty('expires_at');
+
+    // Verify the URL contains correct parameters
+    const url = new URL(response.body.url);
+    expect(url.searchParams.get('provider')).toBe('google');
+    expect(url.searchParams.get('method')).toBe('POST');
+    expect(url.pathname).toContain('/v1/chat/completions');
+  });
+
+  it('requires provider when using client_api_key', async () => {
+    if (skipTest) return;
+    const response = await request(server!)
+      .post('/control/v1/presign')
+      .set('Authorization', 'Bearer sk-stringcost-demo')
+      .send({
+        path: '/v1/chat/completions',
+        client_api_key: 'AIzaSyTestKey',
+        // Missing provider - should fail
+      });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message || JSON.stringify(response.body)).toMatch(/provider.*required/i);
+  });
+
+  it('validates client_key_ttl bounds', async () => {
+    if (skipTest) return;
+
+    // Test below minimum (60 seconds)
+    const response1 = await request(server!)
+      .post('/control/v1/presign')
+      .set('Authorization', 'Bearer sk-stringcost-demo')
+      .send({
+        provider: 'google',
+        path: '/v1/chat/completions',
+        client_api_key: 'AIzaSyTestKey',
+        client_key_ttl: 30, // Below minimum
+      });
+
+    expect(response1.status).toBe(400);
+
+    // Test above maximum (86400 seconds)
+    const response2 = await request(server!)
+      .post('/control/v1/presign')
+      .set('Authorization', 'Bearer sk-stringcost-demo')
+      .send({
+        provider: 'google',
+        path: '/v1/chat/completions',
+        client_api_key: 'AIzaSyTestKey',
+        client_key_ttl: 90000, // Above maximum
+      });
+
+    expect(response2.status).toBe(400);
+
+    // Test valid TTL
+    const response3 = await request(server!)
+      .post('/control/v1/presign')
+      .set('Authorization', 'Bearer sk-stringcost-demo')
+      .send({
+        provider: 'google',
+        path: '/v1/chat/completions',
+        client_api_key: 'AIzaSyTestKey',
+        client_key_ttl: 3600, // Valid
+      });
+
+    expect(response3.status).toBe(200);
+  });
+
+  it('stores encrypted client key in database', async () => {
+    if (skipTest) return;
+
+    const response = await request(server!)
+      .post('/control/v1/presign')
+      .set('Authorization', 'Bearer sk-stringcost-demo')
+      .send({
+        provider: 'google',
+        path: '/v1/chat/completions',
+        client_api_key: 'AIzaSyTestStorageKey',
+        client_key_ttl: 7200,
+      });
+
+    expect(response.status).toBe(200);
+
+    // Verify key was stored in database
+    const pool = new Pool({ connectionString: databaseUrl });
+    const result = await pool.query(
+      `SELECT api_client_id, provider, expires_at
+       FROM client_api_keys
+       WHERE provider = 'google'
+       ORDER BY created_at DESC
+       LIMIT 1`
+    );
+
+    expect(result.rows.length).toBe(1);
+    expect(result.rows[0].provider).toBe('google');
+
+    // Verify expires_at is approximately 2 hours from now
+    const expiresAt = new Date(result.rows[0].expires_at);
+    const now = new Date();
+    const diffSeconds = (expiresAt.getTime() - now.getTime()) / 1000;
+    expect(diffSeconds).toBeGreaterThan(7000); // At least 7000 seconds
+    expect(diffSeconds).toBeLessThan(7400); // Less than 7400 seconds
+
+    await pool.end();
+  });
 });

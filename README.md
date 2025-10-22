@@ -97,6 +97,25 @@ This repository vendors the [Portkey](https://github.com/Portkey-AI/gateway) gat
 - **Worker** (`apps/worker`) – Background process that drains `classification_jobs`, calls the meta classifier, and updates `ledger_events`.
 - **Vendored Portkey** (`vendor/portkey-gateway`) – Clean checkout of the upstream gateway. We keep the git metadata out of tree and pin the commit in `PORTKEY_TAG`.
 
+### 🚀 Portkey Integration Benefits
+
+StringCost leverages **Portkey's AI gateway** to provide:
+
+- **250+ LLM providers** with unified OpenAI-compatible API (Google Gemini, Anthropic, Cohere, Azure, etc.)
+- **Automatic request transformation** – Use OpenAI format for all providers; Portkey handles the translation
+- **Built-in reliability** – Retries, fallbacks, load balancing, timeouts
+- **Advanced features**:
+  - Semantic caching for faster responses
+  - Guardrails for content filtering
+  - Real-time streaming
+  - Multimodal support (images, audio, video)
+- **Provider-specific capabilities**:
+  - **Gemini**: System prompt transformation, Google Search grounding, extended thinking mode
+  - **Anthropic**: Prompt caching, tool use
+  - **OpenAI**: Function calling, vision, audio
+
+All of this is available through StringCost's unified presign + signed URL flow with built-in cost tracking and billing.
+
 > **Base URLs (production)**  
 > Gateway: `https://api.stringcost.com/llm`  
 > Control plane: `https://api.stringcost.com/control`  
@@ -257,28 +276,65 @@ The deployment script activates the Terraform-generated service account, fetches
 
 ## API Usage
 
-Runtime requests no longer require custom headers. Instead, clients obtain a **one-use signed URL** from the control plane and then call that URL with the same headers they would send to the upstream provider (e.g., OpenAI or Anthropic). The signed URL encodes provider selection, virtual keys, run/user IDs, and optional extras (retry rules, metadata, body hash, etc.).
+Runtime requests no longer require custom headers. Instead, clients obtain a **one-use signed URL** from the control plane and then call that URL with the same headers they would send to the upstream provider (e.g., Gemini, OpenAI, or Anthropic). The signed URL encodes provider selection, API keys, run/user IDs, and optional extras (retry rules, metadata, body hash, etc.).
 
-1. **Pre-sign** the target path using your StringCost API key (`Authorization: Bearer sk-stringcost-demo`).
-2. **Invoke** the returned URL with your normal provider headers (`Authorization: Bearer sk-openai-...`).
-3. **(Optional)** Emit additional ledger events to `/events` for tool calls or custom steps.
+**Two modes supported:**
+1. **Client-provided API keys** – Pass your own provider API key (e.g., Gemini API key) at presign time, stored temporarily with automatic expiration
+2. **Pre-configured credentials** – Use virtual keys stored in the control plane database
 
-### 1. Generate a signed URL
+### Example: Using Google Gemini with Client-Provided API Key
+
+This is the recommended approach for getting started - your API key is stored temporarily (default 1 hour, max 24 hours) and auto-deleted using pg_cron.
+
+**Important:** Portkey (the underlying router) uses provider name `"google"` for Gemini and provides OpenAI-compatible endpoints. You use OpenAI's chat completions format, and Portkey automatically transforms requests/responses for Gemini's API.
+
+#### 1. Generate a signed URL with your Gemini API key
 
 ```bash
 curl -X POST https://api.stringcost.com/control/v1/presign \
   -H "Authorization: Bearer sk-stringcost-demo" \
   -H "Content-Type: application/json" \
   -d '{
-        "provider": "openai",
+        "provider": "google",
         "method": "POST",
         "path": "/v1/chat/completions",
-        "session_id": "018f1d5f-8aa5-7c93-a44a-53f97b07c1d3",
+        "client_api_key": "AIzaSy...your-actual-gemini-key",
+        "client_key_ttl": 3600,
         "run_id": "6a9ab408-541f-40d3-af8a-5091c58cb89d",
         "user_id": "customer-4242",
-        "virtual_key": "vk-openai-demo",
         "metadata": {"tier": "gold"},
         "config": {
+          "model": "gemini-1.5-flash"
+        },
+        "expires_in": 45
+      }'
+```
+
+**Key parameters:**
+- `provider` – Use `"google"` for Gemini (Portkey's provider name)
+- `path` – Use OpenAI-compatible path `/v1/chat/completions`
+- `client_api_key` – Your Gemini API key from Google AI Studio (stored encrypted, auto-deleted after TTL)
+- `client_key_ttl` – How long to store the key in seconds (60-86400, default: 3600)
+- `config.model` – Gemini model name (e.g., `gemini-1.5-flash`, `gemini-1.5-pro`, `gemini-2.0-flash-thinking-exp`)
+
+### Alternative: Using Pre-Configured Credentials
+
+If you've stored credentials in the control plane database, use virtual keys:
+
+```bash
+curl -X POST https://api.stringcost.com/control/v1/presign \
+  -H "Authorization: Bearer sk-stringcost-demo" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "provider": "google",
+        "method": "POST",
+        "path": "/v1/chat/completions",
+        "virtual_key": "vk-gemini-demo",
+        "run_id": "6a9ab408-541f-40d3-af8a-5091c58cb89d",
+        "user_id": "customer-4242",
+        "metadata": {"tier": "gold"},
+        "config": {
+          "model": "gemini-1.5-flash",
           "retry": {"attempts": 3, "on_status_codes": [429] }
         },
         "expires_in": 45
@@ -320,7 +376,31 @@ Canonical string (used for signature verification):
 METHOD\nHOST\nPATH\nBODY_HASH\nEXP\nNONCE\nSESSION\nCLIENT\nPROVIDER\nSCOPE\nCFG_HASH\nRUN_ID\nUSER_ID\nMETADATA_HASH
 ```
 
-### 2. Call the gateway using the signed URL
+#### 2. Call the gateway using the signed URL
+
+```bash
+curl "https://api.stringcost.com/llm/v1/chat/completions?kid=...&client=...&...&sig=..." \
+  -H "Content-Type: application/json" \
+  -d '{
+        "model": "gemini-1.5-flash",
+        "messages": [
+          {"role": "user", "content": "Explain how AI works in 3 bullet points"}
+        ]
+      }'
+```
+
+**Note:** Use OpenAI's chat completions format - Portkey automatically transforms this to Gemini's native format. The API key is already embedded in the signed URL (from the `client_api_key` or `virtual_key` you provided at presign time).
+
+**Portkey's Gemini capabilities:**
+- ✅ Automatic system prompt transformation for Gemini compatibility
+- ✅ Google Search grounding with `"google_search"` tool
+- ✅ Multimodal support (images, audio, video, documents)
+- ✅ Streaming responses
+- ✅ Extended thinking mode (`gemini-2.0-flash-thinking-exp`)
+
+### Example: Using OpenAI
+
+For OpenAI, the flow is similar:
 
 ```bash
 curl "https://api.stringcost.com/llm/v1/chat/completions?kid=...&client=...&...&sig=..." \
@@ -358,7 +438,37 @@ curl https://api.stringcost.com/events \
 
 The event collector inserts the record into `ledger_events` and enqueues the prompt for meta-classification. The worker updates `action_type` once the classifier responds.
 
-### Signed URL security notes
+### Client-Provided API Key Storage & Security
+
+When using `client_api_key`, StringCost stores your provider API key temporarily in PostgreSQL with these safeguards:
+
+- **Encryption at rest:** Keys are encrypted using pgcrypto (`pgp_sym_encrypt`) with `DATABASE_ENCRYPTION_KEY`
+- **Automatic deletion:** pg_cron deletes expired keys hourly (requires `CREATE EXTENSION pg_cron`)
+- **Configurable TTL:** Set `client_key_ttl` (60-86400 seconds, default: 3600)
+- **Per-client isolation:** Keys are scoped to your `api_client_id` and cannot be accessed by others
+
+**Setup pg_cron for automatic cleanup:**
+
+```sql
+-- Requires superuser or pg_cron permissions
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+-- Verify the cleanup job is scheduled
+SELECT * FROM cron.job WHERE jobname = 'cleanup-expired-client-api-keys';
+```
+
+If pg_cron is unavailable, set up a manual cleanup cron job:
+
+```bash
+# Run every hour
+0 * * * * psql $DATABASE_URL -c "DELETE FROM client_api_keys WHERE expires_at < NOW()"
+```
+
+**Environment variables:**
+
+- `DATABASE_ENCRYPTION_KEY` – 32-byte key for encrypting client API keys (required for production)
+
+### Signed URL Security Notes
 
 - **Key management:** Configure `URL_TOKEN_KEYS="kid1:base64key,kid2:base64key"` (32-byte HMAC keys). Optionally set `URL_TOKEN_PRIMARY_KID` to select the active signing key.
 - **Config encryption:** `URL_TOKEN_CONFIG_KEY` supplies the AES-256-GCM key that encrypts provider secrets inside the `cfg` parameter (falls back to the primary signing key when omitted).
@@ -372,10 +482,12 @@ The event collector inserts the record into `ledger_events` and enqueues the pro
 
 | Field | Purpose |
 | --- | --- |
-| `provider` | Which stored credential to use (`openai`, `anthropic`, `groq`, …). Optional if you supply `virtual_key`. |
-| `virtual_key` | Explicit credential key to use (overrides `provider` default). |
+| `provider` | Portkey provider name (`google` for Gemini, `openai`, `anthropic`, `groq`, …). Required when using `client_api_key`. Optional with `virtual_key`. See [Portkey docs](https://portkey.ai/docs/integrations/llms) for all providers. |
+| `virtual_key` | Explicit credential key stored in database (overrides `provider` default). Cannot be used with `client_api_key`. |
+| `client_api_key` | Your provider API key (stored encrypted temporarily). Use this for quick setup without pre-configuring credentials. |
+| `client_key_ttl` | How long to store `client_api_key` in seconds (60-86400, default: 3600). Keys auto-delete via pg_cron. |
 | `method` | HTTP verb to lock the signed URL to (`POST`, `GET`, …). Defaults to `POST`. |
-| `path` | Target path relative to `/llm` (e.g., `/v1/chat/completions`). |
+| `path` | Target path relative to `/llm` (e.g., `/v1/chat/completions`, `/v1beta/models/gemini-1.5-flash:generateContent`). |
 | `config` | Optional Portkey configuration overrides (targets, retry policy, guardrails, cache, etc.). The control plane injects the real `api_key` before sealing the token. |
 | `run_id`, `user_id` | Embedded into the token so ledger events and metrics map back to your agent/session. |
 | `metadata` | Arbitrary JSON persisted alongside the ledger entry. |
