@@ -208,9 +208,19 @@ TESTCONTAINERS_RYUK_DISABLED=true npm run test:ledger
 
 Supertest-based API suites (gateway and control plane) must bind to a local socket. Enable them by exporting `ENABLE_SUPERTEST=true` before running the respective workspace tests (CI jobs set this automatically; sandboxes without socket access will skip these suites).
 
-## Deploy to GKE (App Engine–style workflow)
+## Deploy to GKE (Laptop → Production Workflow)
 
-You can deploy directly from this repository—no GitOps required. The Terraform stack provisions the cluster, static IP, and deployer service account; the `npm run gae:deploy` script uses Skaffold + Cloud Build to build/publish images and apply the Helm chart.
+**✅ Uses Helm + Skaffold** - Deploy directly from your laptop—no GitOps required.
+
+The deployment uses:
+- **Helm** for Kubernetes manifests (clean, parameterized YAML)
+- **Skaffold** for building images via Google Cloud Build
+- **Terraform** for GKE cluster provisioning
+- **Local deployment** from your laptop (no CI/CD needed)
+
+**📖 See [deploy/gke/DEPLOYMENT.md](deploy/gke/DEPLOYMENT.md) for complete step-by-step guide.**
+
+Quick start:
 
 ### Required credentials & permissions
 
@@ -246,33 +256,47 @@ export PROD_CLUSTER_NAME="$(terraform -chdir=terraform output -raw prod_cluster_
 export REGION="${REGION:-us-central1}"
 ```
 
-Create the runtime secret expected by the Helm chart (adjust values for your environment):
+Create Kubernetes secrets with all required keys:
 
 ```bash
+# Generate encryption keys
+export DATABASE_ENCRYPTION_KEY="$(openssl rand -base64 32)"
+export URL_TOKEN_KEYS="primary:$(openssl rand -base64 32),secondary:$(openssl rand -base64 32)"
+
+# Create secret
 kubectl create secret generic stringcost-config \
-  --from-literal=database_url="postgres://user:pass@host:5432/dbname" \
-  --from-literal=classifier_endpoint="https://classifier.internal/v1/classify" \
-  --from-literal=classifier_api_key="replace-me"
+  --from-literal=database_url="postgresql://user:pass@host:5432/stringcost" \
+  --from-literal=database_encryption_key="${DATABASE_ENCRYPTION_KEY}" \
+  --from-literal=url_token_keys="${URL_TOKEN_KEYS}" \
+  --from-literal=classifier_endpoint="https://classifier.com/v1/classify" \
+  --from-literal=classifier_api_key="your-api-key"
 ```
 
-> If the optional dev/prod clusters are disabled, Terraform outputs the literal string `not created`. In that case the corresponding `export` is optional; the deploy script simply skips `dev`/`prod` profiles unless the clusters exist.
+**Required secret keys:**
+- `database_url` - PostgreSQL connection string
+- `database_encryption_key` - For encrypting client-provided API keys
+- `url_token_keys` - HMAC keys for signing URLs (supports rotation)
+- `classifier_endpoint` - Meta classifier API endpoint
+- `classifier_api_key` - Classifier API key
 
-### 2. Deploy from your laptop (or CI runner)
+### 2. Deploy from your laptop
 
 ```bash
-cd deploy/gke
-npm run gae:deploy        # main cluster (Cloud Build builds & pushes images)
-# npm run gae:deploy:dev  # optional dev cluster (if created)
-# npm run gae:deploy:prod # optional prod cluster (if created)
+# Deploy to default cluster
+npm run gke:deploy
+
+# Or deploy to specific environment
+npm run gke:deploy:dev   # dev cluster
+npm run gke:deploy:prod  # prod cluster
 ```
 
-`npm run gae:deploy` runs `skaffold run`, which uses **Google Cloud Build** to build the Docker images defined in `apps/*/Dockerfile` and pushes them to Artifact/GCR before Helm rolls them out. No images are built locally by default; if you do local Docker work for debugging, you can clear stale layers afterwards with:
+This runs Skaffold which:
+1. ✅ Builds Docker images via **Google Cloud Build** (not local)
+2. ✅ Pushes to GCR/Artifact Registry
+3. ✅ Deploys Helm chart with all 4 services
+4. ✅ Configures Ingress + TLS certificate
 
-```bash
-npm run docker:clean       # runs `docker image prune -af` (best-effort)
-```
-
-The deployment script activates the Terraform-generated service account, fetches cluster credentials, prunes old images from the registry, triggers Cloud Build via Skaffold, and finally applies the Helm release. Just rerun the command whenever you want to deploy new code.
+**No local Docker builds** - all images are built in Cloud Build for consistency.
 
 ## API Usage
 

@@ -10,6 +10,9 @@
   "scripts": {
     "deploy:build": "npm run build",
     "deploy:start": "npx pm2-runtime deploy/ecosystem.config.cjs",
+    "gke:deploy": "bash deploy/gke/deploy.sh",
+    "gke:deploy:dev": "bash deploy/gke/deploy.sh dev",
+    "gke:deploy:prod": "bash deploy/gke/deploy.sh prod",
     "gae:start": "npm run build && npx pm2-runtime deploy/ecosystem.config.cjs",
     "gae:deploy": "bash deploy/appengine/deploy.sh",
     "gae:clean": "node deploy/appengine/clean.mjs",

@@ -12,15 +12,31 @@ services:
     containerPort: 8787
     ingressPath: /llm
     healthPath: /healthz
+    readinessPath: /readyz
     env:
       - name: PORT
         value: "8787"
+      - name: CONTROL_PLANE_URL
+        value: "http://control-plane:8080/control"
+      - name: URL_TOKEN_KEYS
+        valueFrom:
+          secretKeyRef:
+            name: stringcost-config
+            key: url_token_keys
+      - name: SIGNED_URL_DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: stringcost-config
+            key: database_url
+      - name: DISABLE_RATE_LIMITING
+        value: "false"
   - name: control-plane
     image: control-plane
     replicas: 1
     containerPort: 8080
     ingressPath: /control
     healthPath: /healthz
+    readinessPath: /readyz
     env:
       - name: PORT
         value: "8080"
@@ -29,12 +45,27 @@ services:
           secretKeyRef:
             name: stringcost-config
             key: database_url
+      - name: DATABASE_ENCRYPTION_KEY
+        valueFrom:
+          secretKeyRef:
+            name: stringcost-config
+            key: database_encryption_key
+      - name: URL_TOKEN_KEYS
+        valueFrom:
+          secretKeyRef:
+            name: stringcost-config
+            key: url_token_keys
+      - name: GATEWAY_BASE_URL
+        value: "https://$(domain)"
+      - name: DISABLE_RATE_LIMITING
+        value: "false"
   - name: event-collector
     image: event-collector
     replicas: 1
     containerPort: 8080
     ingressPath: /events
     healthPath: /healthz
+    readinessPath: /readyz
     env:
       - name: PORT
         value: "8080"
@@ -43,6 +74,8 @@ services:
           secretKeyRef:
             name: stringcost-config
             key: database_url
+      - name: DISABLE_RATE_LIMITING
+        value: "false"
   - name: worker
     image: worker
     replicas: 1
