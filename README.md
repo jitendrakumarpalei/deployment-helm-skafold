@@ -205,21 +205,23 @@ TESTCONTAINERS_RYUK_DISABLED=true npm test
 Before deploying or building Docker images, run smoke tests to verify all services build and start correctly:
 
 ```bash
-# CI-style build test (no Docker, mimics exact Docker build steps)
+# CI-style build test (no Docker, mirrors exact Docker build steps)
 npm run smoke-test
 
 # Docker build test (builds all 4 service images and tests startup)
 npm run docker:smoke-test
 ```
 
-The CI-style smoke test:
-- Creates a temporary workspace and copies project files
-- Installs dependencies (including portkey-gateway for gateway service)
-- Builds all workspaces in the correct order
-- Verifies built artifacts exist
-- Tests that each service can load without crashes
+The CI-style smoke test **exactly mirrors** the Docker multi-stage build process:
 
-This is especially useful in CI pipelines to catch build issues before Docker image creation.
+1. **Copy package files first** - Copies `package.json`, `package-lock.json`, `tsconfig.base.json`, and all workspace `package.json` files
+2. **Install dependencies** - Runs `npm install --workspaces --include-workspace-root`
+3. **Copy source files** - Copies all source code (excluding node_modules, dist, build, .git)
+4. **Build workspaces** - Builds portkey-gateway (for gateway only), @stringcost/shared, and the target service
+5. **Verify artifacts** - Checks that all expected build outputs exist
+6. **Test startup** - Verifies each service can load without syntax errors
+
+This exact mirroring ensures that if the smoke test passes, the Docker build will succeed. It's especially useful in CI pipelines to catch build issues before Docker image creation.
 
 To run only the ledger integrations (LangChain proxy + worker + migrations):
 

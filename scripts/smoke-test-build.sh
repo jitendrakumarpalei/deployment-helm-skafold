@@ -10,6 +10,7 @@ NC='\033[0m' # No Color
 # Configuration
 SERVICES=("gateway" "control-plane" "event-collector" "worker")
 WORKSPACE_DIR="/tmp/stringcost-build-test-$$"
+PROJECT_ROOT="$(pwd)"
 
 echo "=================================================="
 echo "Build Smoke Test (CI-style, no Docker)"
@@ -46,15 +47,22 @@ trap cleanup EXIT
 # Create workspace
 print_status "INFO" "Creating workspace: $WORKSPACE_DIR"
 mkdir -p "$WORKSPACE_DIR"
-
-# Copy project (mimicking COPY . .)
-print_status "INFO" "Copying project files..."
-rsync -a --exclude='node_modules' --exclude='dist' --exclude='build' --exclude='.git' \
-    ./ "$WORKSPACE_DIR/"
-
 cd "$WORKSPACE_DIR"
 
-# Install dependencies (mimicking Docker build)
+# Step 1: Copy package files first (mimicking Docker COPY package*.json)
+print_status "INFO" "Copying package files..."
+cp "$PROJECT_ROOT/package.json" "$PROJECT_ROOT/package-lock.json" "$PROJECT_ROOT/tsconfig.base.json" . 2>/dev/null || true
+
+# Create workspace directories and copy their package.json files
+mkdir -p apps/gateway apps/control-plane apps/event-collector apps/worker apps/shared vendor/portkey-gateway
+cp "$PROJECT_ROOT/apps/gateway/package.json" apps/gateway/ 2>/dev/null || true
+cp "$PROJECT_ROOT/apps/control-plane/package.json" apps/control-plane/ 2>/dev/null || true
+cp "$PROJECT_ROOT/apps/event-collector/package.json" apps/event-collector/ 2>/dev/null || true
+cp "$PROJECT_ROOT/apps/worker/package.json" apps/worker/ 2>/dev/null || true
+cp "$PROJECT_ROOT/apps/shared/package.json" apps/shared/ 2>/dev/null || true
+cp "$PROJECT_ROOT/vendor/portkey-gateway/package.json" vendor/portkey-gateway/ 2>/dev/null || true
+
+# Step 2: Install dependencies (mimicking Docker RUN npm install)
 print_status "INFO" "Installing dependencies..."
 if ! npm install --workspaces --include-workspace-root > /tmp/npm-install.log 2>&1; then
     print_status "FAIL" "npm install failed"
@@ -63,6 +71,12 @@ if ! npm install --workspaces --include-workspace-root > /tmp/npm-install.log 2>
     exit 1
 fi
 print_status "OK" "Dependencies installed"
+
+# Step 3: Copy all source files (mimicking Docker COPY . .)
+print_status "INFO" "Copying all source files..."
+rsync -a --exclude='node_modules' --exclude='dist' --exclude='build' --exclude='.git' \
+    "$PROJECT_ROOT/" ./ 2>&1 | grep -v "skipping non-regular" || true
+print_status "OK" "Source files copied"
 
 # Function to build a service
 build_service() {
