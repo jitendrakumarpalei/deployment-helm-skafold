@@ -22,6 +22,8 @@
     "gae:start:worker": "node apps/worker/dist/server.js",
     "build": "npm -ws run build",
     "test": "npm -ws run test",
+    "smoke-test": "bash scripts/smoke-test-build.sh",
+    "docker:smoke-test": "bash scripts/smoke-test-docker.sh",
     "test:ledger": "npm run test --workspace @stringcost/ledger",
     "migrate": "npm run migrate --workspace @stringcost/ledger",
     "migrate:control-plane": "tsx ./node_modules/knex/bin/cli.js --knexfile apps/control-plane/knexfile.ts migrate:latest",

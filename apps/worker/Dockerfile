@@ -2,12 +2,14 @@ FROM node:20-alpine AS build
 
 WORKDIR /workspace
 
-COPY package*.json ./
-COPY tsconfig.base.json ./
-COPY patches ./patches
-
 RUN apk add --no-cache python3 make g++
 RUN npm install -g npm@10.9.2
+
+# Copy package files for all workspaces first
+COPY package*.json tsconfig.base.json ./
+COPY apps/worker/package.json ./apps/worker/
+COPY apps/shared/package.json ./apps/shared/
+
 RUN npm install --workspaces --include-workspace-root
 
 COPY . .

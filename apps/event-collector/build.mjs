@@ -21,5 +21,5 @@ await build({
   target: ['node18'],
   sourcemap: false,
   splitting: false,
-  external: [],
+  packages: 'external',
 });

@@ -12,7 +12,7 @@ const commonOptions = {
   format: 'esm',
   target: ['node18'],
   sourcemap: false,
-  external: [],
+  packages: 'external',
 };
 
 await build({

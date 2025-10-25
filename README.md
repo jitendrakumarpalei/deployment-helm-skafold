@@ -200,6 +200,27 @@ Vitest relies on Testcontainers to spin up PostgreSQL automatically. Disable Ryu
 TESTCONTAINERS_RYUK_DISABLED=true npm test
 ```
 
+### Build Smoke Tests
+
+Before deploying or building Docker images, run smoke tests to verify all services build and start correctly:
+
+```bash
+# CI-style build test (no Docker, mimics exact Docker build steps)
+npm run smoke-test
+
+# Docker build test (builds all 4 service images and tests startup)
+npm run docker:smoke-test
+```
+
+The CI-style smoke test:
+- Creates a temporary workspace and copies project files
+- Installs dependencies (including portkey-gateway for gateway service)
+- Builds all workspaces in the correct order
+- Verifies built artifacts exist
+- Tests that each service can load without crashes
+
+This is especially useful in CI pipelines to catch build issues before Docker image creation.
+
 To run only the ledger integrations (LangChain proxy + worker + migrations):
 
 ```bash
