@@ -14,6 +14,8 @@ export default defineConfig({
     globals: true,
     include: ['../../tests/control-plane/**/*.test.ts'],
     hookTimeout: 120_000,
-    testTimeout: 60_000
+    testTimeout: 60_000,
+    // Run tests sequentially to avoid database conflicts with Testcontainers
+    fileParallelism: false,
   }
 });

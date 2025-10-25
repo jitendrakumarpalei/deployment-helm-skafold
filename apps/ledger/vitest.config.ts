@@ -14,6 +14,8 @@ export default defineConfig({
     globals: true,
     include: ['../../tests/ledger/**/*.test.ts', '../../tests/langchain/**/*.test.ts'],
     hookTimeout: 120_000,
-    testTimeout: 120_000
+    testTimeout: 120_000,
+    // Run tests sequentially to avoid database conflicts with Testcontainers
+    fileParallelism: false,
   }
 });

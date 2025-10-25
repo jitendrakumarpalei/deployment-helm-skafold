@@ -7,9 +7,7 @@
  * Security: Keys are encrypted at rest using pgcrypto.
  */
 export async function up(knex) {
-  // Ensure pgcrypto extension exists (for encrypted key storage)
-  await knex.raw('CREATE EXTENSION IF NOT EXISTS "pgcrypto"');
-
+  // pgcrypto extension should already exist from initial_schema migration
   // Create table for temporary client API keys
   await knex.schema.createTable('client_api_keys', (table) => {
     table.uuid('id').primary().defaultTo(knex.raw('gen_random_uuid()'));

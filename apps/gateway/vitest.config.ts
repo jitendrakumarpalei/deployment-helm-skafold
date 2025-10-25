@@ -12,6 +12,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    include: ['../../tests/gateway/**/*.test.ts']
+    include: ['../../tests/gateway/**/*.test.ts'],
+    hookTimeout: 120_000,
+    testTimeout: 60_000,
+    // Run tests sequentially to avoid database conflicts with Testcontainers
+    fileParallelism: false,
   }
 });

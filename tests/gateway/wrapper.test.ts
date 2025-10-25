@@ -7,8 +7,10 @@ process.env.DISABLE_RATE_LIMITING = 'true';
 import app from '../../apps/gateway/src/app';
 import portkeyApp from '../../vendor/portkey-gateway/src/index';
 import { createSignedUrl } from '@stringcost/shared/signedUrl';
+import * as replayStore from '../../apps/gateway/src/replayStore';
 
 let portkeyFetchSpy: ReturnType<typeof vi.spyOn> | undefined;
+let replayStoreSpy: ReturnType<typeof vi.spyOn> | undefined;
 let forwardedRequest: Request | undefined;
 const originalEnv = process.env.URL_TOKEN_KEY;
 const urlTokenKey = Buffer.alloc(32, 3).toString('base64');
@@ -18,6 +20,9 @@ describe('StringCost Gateway Wrapper', () => {
     forwardedRequest = undefined;
     process.env.URL_TOKEN_KEY = urlTokenKey;
     process.env.GATEWAY_BASE_URL = 'http://test';
+
+    // Mock replay store to always succeed (no replay detection in unit tests)
+    replayStoreSpy = vi.spyOn(replayStore, 'assertNonce').mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -28,6 +33,8 @@ describe('StringCost Gateway Wrapper', () => {
     }
     portkeyFetchSpy?.mockRestore();
     portkeyFetchSpy = undefined;
+    replayStoreSpy?.mockRestore();
+    replayStoreSpy = undefined;
     vi.restoreAllMocks();
   });
 
