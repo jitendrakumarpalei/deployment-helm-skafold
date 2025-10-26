@@ -1,561 +1,610 @@
-# agents.md - GKE Deployment Project
+# agents.md - StringCost Gateway & Billing Stack
+
+*Last Updated: 2025-10-26*
+*Project: StringCost - AI Gateway with Usage Tracking & Billing*
+*Architecture: 4 Microservices on GKE + PostgreSQL + Vendored Portkey Gateway*
+
+---
 
 ## 1. Timeline of Key Decisions
 
-### Decision 1: App Engine Standard vs GKE
-**When:** Initial architecture discussion  
-**Context:** Need to connect to Valkey (Redis) via private IP  
+### Decision 1: Vendor Portkey Gateway vs Use as Service
+**When:** Initial architecture discussion
+**Context:** Need reliable AI gateway supporting 250+ LLM providers
 **Options Considered:**
-- App Engine Standard + Serverless VPC Access Connector ($$$)
-- App Engine Flexible (always-on, higher cost)
-- GKE (native VPC access)
+- Use Portkey's hosted service
+- Self-host Portkey as separate deployment
+- Vendor Portkey code directly into monorepo
 
-**Decision:** GKE with Autopilot or Standard  
-**Rationale:** 
-- Native VPC access eliminates VPC connector costs
-- More flexibility for microservices
-- Better cost efficiency for multiple services
-- Direct private IP connectivity to Valkey/Cloud SQL
+**Decision:** Vendor Portkey gateway into `vendor/portkey-gateway/`
+**Rationale:**
+- Full control over gateway behavior
+- No external service dependencies
+- Can run in-process with wrapper for custom auth
+- Pin to specific version for stability
+- Track version in `PORTKEY_TAG`
 
-**Impact:** Saved ~$50-100/month on VPC connector fees, gained Kubernetes flexibility
+**Impact:** Gateway service wraps Portkey in-process, complete control over routing
 
 ---
 
-### Decision 2: GKE Autopilot vs Standard
-**When:** During infrastructure design  
-**Context:** Balance between ease-of-use and control  
+### Decision 2: Signed URLs vs Traditional API Keys
+**When:** Security architecture design
+**Context:** Need secure, time-limited access to AI gateway
 **Options Considered:**
-- GKE Autopilot (serverless-like, managed)
-- GKE Standard (full control)
+- Traditional API keys stored in database
+- JWT tokens
+- HMAC-signed URLs with encrypted config
 
-**Decision:** GKE Standard  
+**Decision:** HMAC-signed URLs with AES-256-GCM encrypted route config
 **Rationale:**
-- More control over node configuration
-- Better understanding of costs
-- Ability to use preemptible nodes for dev
-- Standard is more predictable for this use case
+- Time-limited (prevents replay attacks)
+- Config embedded in URL (no gateway → control-plane roundtrip)
+- Supports key rotation with multiple signing keys
+- Session-scoped nonce for replay protection
+- Stateless gateway design
 
-**Impact:** Full control over infrastructure, predictable costs
+**Impact:** Gateway validates signatures, no DB lookup per request
 
 ---
 
-### Decision 3: Deployment Tooling - Skaffold vs Manual
-**When:** Architecture finalization  
-**Context:** Want "App Engine-like" experience: simple, one-command deploys  
+### Decision 3: Client-Provided API Keys Storage
+**When:** Gemini API integration
+**Context:** Allow clients to use their own provider API keys
 **Options Considered:**
-- Pure `gcloud builds submit` + manual kubectl
-- Skaffold + Helm
-- Argo CD / Flux (GitOps)
+- Store keys in plaintext
+- Store encrypted keys indefinitely
+- Store encrypted keys with TTL and auto-deletion
 
-**Decision:** Skaffold + Helm  
+**Decision:** pgcrypto-encrypted storage with pg_cron auto-cleanup
 **Rationale:**
-- Skaffold abstracts away Cloud Build complexity
-- Helm provides templating for multiple services
-- No GitOps needed (user explicitly didn't want it)
-- Single command deployment from laptop
-- Built-in Cloud Build integration
+- Keys encrypted at rest (pgp_sym_encrypt)
+- Configurable TTL (60-86400 seconds)
+- Auto-delete with pg_cron hourly job
+- Graceful fallback if pg_cron unavailable
+- Per-client isolation with CASCADE delete
 
-**Impact:** Achieved `npm run gae:deploy` simplicity matching App Engine
+**Impact:** Secure temporary key storage, automatic cleanup
 
 ---
 
-### Decision 4: Infrastructure as Code - Terraform with Local State
-**When:** Infrastructure automation discussion  
-**Context:** User wants Terraform but insists on local laptop state  
+### Decision 4: Database Migrations Strategy
+**When:** Kubernetes deployment planning
+**Context:** Need reliable schema management across deployments
 **Options Considered:**
-- Manual setup via gcloud commands
-- Terraform with GCS backend (remote state)
-- Terraform with local state
+- Manual migrations from laptop
+- Init containers on each pod
+- Pre-install/pre-upgrade Kubernetes Job
 
-**Decision:** Terraform with local state  
+**Decision:** Kubernetes Job as Helm hook
 **Rationale:**
-- User explicitly requested local state
-- Solo developer, no team conflicts
-- Can optionally commit state to private repo
-- Full IaC benefits with simpler setup
-- No additional GCS costs
+- Runs once per deployment (not per pod)
+- Blocks deployment if migrations fail (safe)
+- Idempotent (Knex tracks applied migrations)
+- Auto-deletes after completion (TTL)
+- Works for both fresh deploys and schema updates
 
-**Impact:** One-time infrastructure setup, reproducible environments
+**Impact:** Automatic, safe migrations on every deploy
 
 ---
 
-### Decision 5: Service Account Authentication
-**When:** Security and automation planning  
-**Context:** Need secure, repeatable deployments from laptop  
+### Decision 5: Rate Limiting Implementation
+**When:** Production hardening
+**Context:** Prevent abuse of control-plane and gateway endpoints
 **Options Considered:**
-- Personal gcloud credentials
-- Service account with key file
-- Workload Identity (overkill for laptop deploys)
+- In-memory rate limiting (loses state on restart)
+- Redis-backed rate limiting
+- PostgreSQL-backed rate limiting
 
-**Decision:** Service account with JSON key  
+**Decision:** PostgreSQL-backed rate limiting via `hono-rate-limiter` + `@acpr/rate-limit-postgresql`
 **Rationale:**
-- Scoped permissions (principle of least privilege)
-- Works in CI/CD if needed later
-- Can be rotated independently
-- No personal credentials in scripts
-- Terraform can generate and manage the key
+- Reuses existing PostgreSQL database
+- Persistent across restarts
+- No additional Redis infrastructure
+- Disabled in tests/dev via `DISABLE_RATE_LIMITING=true`
+- Per-IP and per-endpoint limits
 
-**Impact:** Secure, automated authentication without personal credentials
+**Impact:** Production-ready rate limiting, no extra infrastructure
 
 ---
 
-### Decision 6: Load Balancing - Container-Native (NEG) vs NodePort
-**When:** Ingress configuration  
-**Context:** Need efficient routing and Google-managed SSL  
+### Decision 6: Docker Build Strategy
+**When:** CI/CD pipeline setup
+**Context:** Need reproducible multi-stage builds
 **Options Considered:**
-- NodePort services (two-hop routing)
-- LoadBalancer services (one per service, expensive)
-- Container-native load balancing with NEGs
+- Simple single-stage Dockerfiles
+- Multi-stage with full source copy
+- Multi-stage with selective package.json copy
 
-**Decision:** Container-native with NEGs  
+**Decision:** Multi-stage with package files copied first
 **Rationale:**
-- Direct pod routing (no double-hop)
-- Lower latency and more reliable
-- Single shared load balancer
-- Required for Google-managed certificates
-- Better performance and cost
+- Better Docker layer caching (dependencies cached separately)
+- Smaller final images (only runtime artifacts)
+- Matches best practices for Node.js builds
+- Gateway builds portkey-gateway first
+- Uses `packages: 'external'` in esbuild to avoid bundling node_modules
 
-**Impact:** Optimal performance, single global LB, free SSL certs
+**Impact:** Fast rebuilds, optimized image sizes
 
 ---
 
-### Decision 7: Image Retention - Aggressive Cleanup
-**When:** Cost optimization discussion  
-**Context:** User doesn't want artifact persistence beyond latest  
+### Decision 7: Test Isolation Strategy
+**When:** Fixing race conditions in tests
+**Context:** Testcontainers tests failing with deadlocks and duplicate keys
 **Options Considered:**
-- Keep all images (standard practice)
-- Keep last N images
-- Keep only latest image
+- Parallel test execution (default)
+- Sequential test execution per file
+- Separate databases per test file
 
-**Decision:** Keep only latest image, delete everything else  
+**Decision:** Sequential test execution (`fileParallelism: false`)
 **Rationale:**
-- User prioritizes quick iteration over rollback capability
-- Can always redeploy from source if needed
-- Minimizes GCR storage costs
-- Automatic cleanup in deployment scripts
+- Simpler than managing multiple test databases
+- Prevents database deadlocks during schema drops
+- Testcontainers creates fresh database per suite
+- Acceptable for CI/CD (tests complete in ~2 minutes)
 
-**Impact:** Minimal storage costs, ~90% reduction in GCR usage
+**Impact:** Reliable test execution, no race conditions
 
 ---
 
-### Decision 8: Deployment Code Location - Separate deploy/ Directory
-**When:** Project structure discussion  
-**Context:** User wants deployment separate from source code  
+### Decision 8: Smoke Test Architecture
+**When:** Build verification setup
+**Context:** Need to catch build issues before Docker/K8s deployment
 **Options Considered:**
-- Deployment files in each service directory
-- Root-level deployment files
-- Separate deploy/ directory outside source
+- Just run `npm test`
+- Build locally without Docker
+- Build with Docker
 
-**Decision:** `deploy/` directory with `terraform/` and `gke/` subdirectories  
+**Decision:** Both CI-style (no Docker) and Docker smoke tests
 **Rationale:**
-- Clean separation of concerns
-- Deployment logic isolated from application code
-- Easy to share/version deployment configs separately
-- Matches user's preference
+- CI-style test: Fast, mirrors exact Docker build steps
+- Docker test: Verifies actual container builds
+- Both test all 4 services independently
+- CI-style useful for rapid iteration
+- Docker test for pre-deployment validation
 
-**Impact:** Clean project structure, reusable deployment patterns
+**Impact:** Catch build issues in <2 minutes instead of during K8s deploy
+
+---
+
+### Decision 9: Portkey Provider Naming
+**When:** Gemini API integration
+**Context:** Confusion about "gemini" vs "google" provider name
+**Options Considered:**
+- Use native Gemini API paths
+- Use Portkey's naming convention
+- Support both
+
+**Decision:** Use Portkey's "google" provider name with OpenAI-compatible paths
+**Rationale:**
+- Portkey transforms OpenAI format → Gemini format automatically
+- Unified API across all 250+ providers
+- Leverages Portkey's provider abstractions
+- Path: `/v1/chat/completions` (OpenAI-compatible)
+- API key embedded in signed URL, not headers
+
+**Impact:** Simple, unified API for all LLM providers
 
 ---
 
 ## 2. Pain Points / Lessons Learned
 
-### Pain Point 1: Certificate Provisioning Time
-**Issue:** Google-managed SSL certificates take 15-60 minutes to provision on first deploy  
-**Impact:** Cannot test HTTPS immediately after first deployment  
-**Mitigation:** 
-- Document expected wait time upfront
-- Provide `kubectl describe managedcertificate` command to check status
-- Ensure DNS is configured correctly before deploying
-
-**Lesson:** Set expectations early about certificate provisioning delays
-
----
-
-### Pain Point 2: Skaffold Image Tagging Confusion
-**Issue:** Initial confusion about how Skaffold tags and references images in Helm  
-**Impact:** Unclear how image names in values.yaml get replaced  
-**Solution:** 
-- Use `--default-repo` flag to automatically construct image names
-- Use `inputDigest` tag policy for content-based tagging
-- Let Skaffold handle the magic of injecting image references into Helm
-
-**Lesson:** Trust Skaffold's conventions rather than trying to manually specify everything
-
----
-
-### Pain Point 3: Service Account Key Security
-**Issue:** Risk of accidentally committing service account keys to Git  
-**Impact:** Potential security breach  
+### Pain Point 1: Patches Directory Not Existing
+**Issue:** All Dockerfiles copied non-existent `patches/` directory
+**Impact:** Docker builds failing with "patches: not found"
 **Solution:**
-- Comprehensive `.gitignore` entries
-- Terraform generates key directly to right location
-- File permissions set to 0600
-- Clear documentation about never committing keys
+- Removed `COPY patches ./patches` from all Dockerfiles
+- Confirmed no patches are needed (npm-only workspace)
 
-**Lesson:** Make secure defaults easy, insecure defaults impossible
+**Lesson:** Always test Docker builds match CI smoke tests
 
 ---
 
-### Pain Point 4: Local State Coordination
-**Issue:** User wants local Terraform state but this can cause issues in teams  
-**Impact:** Potential state conflicts if multiple people run Terraform  
+### Pain Point 2: Migration Race Conditions
+**Issue:** Multiple migrations trying to create pgcrypto extension simultaneously
+**Impact:** "duplicate key violates unique constraint" errors
 **Solution:**
-- Document clearly this is for solo development
-- Provide migration path to remote state if needed
-- Suggest committing state to private repo with coordination
+- Remove redundant `CREATE EXTENSION pgcrypto` from later migrations
+- Only create extension once in initial schema migration
+- Knex handles migration locking automatically
 
-**Lesson:** Honor user preferences while documenting tradeoffs
-
----
-
-### Pain Point 5: GCR vs Artifact Registry
-**Issue:** GCR is being replaced by Artifact Registry, but GCR still works and is simpler  
-**Impact:** Future migration may be needed  
-**Current Approach:** Use GCR with lifecycle policies  
-**Future:** Should migrate to Artifact Registry for long-term support
-
-**Lesson:** Use what works today, but be aware of deprecation timelines
+**Lesson:** Extensions should be created once in initial schema
 
 ---
 
-### Pain Point 6: Multiple Context Switches
-**Issue:** Original approach required editing multiple files with project IDs  
-**Impact:** Error-prone, tedious setup  
+### Pain Point 3: Replay Store Persisting in Tests
+**Issue:** Unit tests failing with 409 Conflict due to replay detection
+**Impact:** Wrapper test expecting 200, getting 409
 **Solution:**
-- Use `gcloud config get-value project` to auto-detect project
-- Use Terraform variables and outputs
-- Use environment variable expansion in scripts
-- Single source of truth (terraform.tfvars)
+- Mock `assertNonce` function in unit tests
+- Only use real replay store in integration tests
+- Clear in-memory store between tests
 
-**Lesson:** Automate away repetitive configuration
+**Lesson:** Unit tests should mock external state (DB, replay store)
 
 ---
 
-### Pain Point 7: Cleanup Script Compatibility
-**Issue:** Date command differs between Linux and macOS  
-**Impact:** `gcr-cleanup.sh` fails on some systems  
+### Pain Point 4: esbuild Bundling node_modules
+**Issue:** Services failing to start with "Dynamic require of 'events' is not supported"
+**Impact:** Runtime errors in all services
 **Solution:**
-- Use both date formats with fallback: `date -u -d '1 day ago' || date -u -v-1d`
-- Document that cleanup is best-effort
-- Rely primarily on GCS lifecycle policies
+- Change `external: []` to `packages: 'external'` in build configs
+- This tells esbuild to not bundle node_modules
+- Services now require dependencies at runtime
 
-**Lesson:** Shell scripts need cross-platform considerations
+**Lesson:** ESM builds should externalize node_modules for Node.js targets
+
+---
+
+### Pain Point 5: Smoke Test Not Mirroring Docker
+**Issue:** Smoke test copied all files first, then installed dependencies
+**Impact:** Could pass when Docker build fails (different order)
+**Solution:**
+- Update smoke test to match exact Docker flow:
+  1. Copy package.json files
+  2. npm install
+  3. Copy all source
+  4. Build
+- Save PROJECT_ROOT at script start
+
+**Lesson:** Smoke tests must EXACTLY mirror Docker multi-stage builds
+
+---
+
+### Pain Point 6: Classification Jobs Table Missing
+**Issue:** Worker failing in K8s with "relation classification_jobs does not exist"
+**Impact:** Worker crashlooping on startup
+**Root Cause:** Migrations weren't running automatically in Kubernetes
+**Solution:**
+- Created Kubernetes Job as Helm pre-install/pre-upgrade hook
+- Job runs both control-plane and ledger migrations
+- Idempotent (Knex tracks applied migrations)
+- Fails deployment if migrations fail (safe)
+
+**Lesson:** Database migrations should be automated in K8s deployments
 
 ---
 
 ## 3. What Went Well
 
-### ✅ App Engine-Like Experience Achieved
-Successfully replicated the simplicity of `gcloud app deploy` with `npm run gae:deploy`. Today’s refinements added explicit multi-stage Dockerfiles for each service, refreshed Skaffold/Helm wiring, and documented the exact secret/CLI steps so a laptop build + Cloud Build deployment works end-to-end without GitOps.
+### ✅ Vendored Portkey Gateway Integration
+Successfully integrated Portkey as a vendored dependency, allowing custom authentication wrapper while leveraging Portkey's 250+ provider support. The wrapper pattern (gateway → portkey in-process) works flawlessly.
 
-### ✅ Cost Optimization
-Eliminated expensive VPC Access Connector ($50-100/month) by using GKE's native VPC access. Aggressive image cleanup reduces storage costs to near-zero.
+### ✅ Signed URL Architecture
+HMAC-signed URLs with encrypted route config provide secure, time-limited access without database lookups. Replay protection with PostgreSQL-backed nonce tracking.
 
-### ✅ Infrastructure as Code
-Complete Terraform setup means infrastructure is reproducible, versionable, and documented. One `terraform apply` creates everything.
+### ✅ Automatic Database Migrations
+Kubernetes Job runs migrations before deployment, ensuring schema is always up-to-date. Idempotent design means safe redeployment to same database.
 
-### ✅ Security Best Practices
-Service account with scoped permissions, never exposing personal credentials, proper `.gitignore` configuration, and file permissions all implemented correctly.
+### ✅ Comprehensive Test Suite
+- Control-plane: 18 tests (client API keys, presign, URL tokens)
+- Gateway: 8 tests (wrapper, API integration, replay protection)
+- Ledger: 12 tests (migrations, events, worker, billing)
+- All using Testcontainers for isolated PostgreSQL instances
 
-### ✅ Container-Native Load Balancing
-Using NEGs for direct pod routing provides optimal performance and eliminates extra network hop. Single global load balancer for all services.
+### ✅ Multi-Service Docker Builds
+All 4 services (gateway, control-plane, event-collector, worker) build successfully with optimized multi-stage Dockerfiles. Smoke tests verify each independently.
 
-### ✅ Free SSL Certificates
-Google-managed certificates with auto-renewal mean zero SSL management overhead and no certificate costs.
+### ✅ Portkey Provider Abstraction
+Using Portkey's "google" provider with OpenAI-compatible format works seamlessly. Automatic transformation to native Gemini API format.
 
-### ✅ Clean Separation of Concerns
-Deployment code lives separately from application code, making it easy to reuse patterns across projects and keep concerns isolated.
+### ✅ Rate Limiting Without Redis
+PostgreSQL-backed rate limiting provides persistent limits without additional infrastructure. Easy to disable for tests/dev.
 
-### ✅ Helm Templating
-Single Helm chart handles all 5 services through templating, eliminating duplication and making it easy to add more services.
+### ✅ Client-Provided API Keys
+Secure temporary storage with pgcrypto encryption and pg_cron auto-deletion allows clients to use their own provider keys safely.
 
-### ✅ Multi-Environment Ready
-Dev/prod profiles in Skaffold and conditional cluster creation in Terraform make it easy to add environments without duplicating configuration.
+### ✅ Smoke Test Coverage
+Both CI-style (no Docker) and Docker smoke tests catch build issues early. Tests mirror exact Docker build process.
 
-### ✅ Comprehensive Documentation
-Everything from setup to troubleshooting to advanced topics is documented, making the setup maintainable and transferable.
+### ✅ Helm-Based Deployment
+Single Helm chart manages all 4 services with templating. Migration Job integrated as pre-install hook. Easy to add new services.
 
 ---
 
 ## 4. Outstanding Work & Recommendations
 
-### 🔲 Migrate to Artifact Registry
-**Priority:** Medium  
-**Effort:** Low  
-**Why:** GCR is being deprecated in favor of Artifact Registry  
-**Action:** Update Terraform and Skaffold configs to use Artifact Registry instead of GCR
+### 🔲 Implement Monitoring & Observability
+**Priority:** High
+**Effort:** Medium
+**Why:** No visibility into request latency, error rates, or provider health
+**Action:**
+- Add OpenTelemetry instrumentation
+- Export metrics to Google Cloud Monitoring
+- Create dashboards for gateway throughput, provider latency, classification queue depth
+
+---
+
+### 🔲 Add Circuit Breakers (Issue #17)
+**Priority:** High
+**Effort:** Medium
+**Why:** Failing provider calls can cascade and overwhelm the gateway
+**Action:**
+- Implement circuit breaker in gateway wrapper
+- Per-provider circuit state
+- Fail fast when provider is down
+
+---
+
+### 🔲 Implement Audit Logging (Issue #15)
+**Priority:** Medium
+**Effort:** Medium
+**Why:** Partial implementation (request IDs exist), need full audit trail
+**Action:**
+- Create `audit_log` table
+- Log presign requests, gateway calls, classification results
+- Include actor, action, timestamp, outcome
+
+---
+
+### 🔲 Add Dependency Scanning (Issue #24)
+**Priority:** Medium
+**Effort:** Low
+**Why:** No automated vulnerability scanning
+**Action:**
+- Add `npm audit` to CI
+- Set up Dependabot or Renovate
+- Block deployments on high/critical vulnerabilities
+
+---
+
+### 🔲 Document Secrets Rotation (Issue #20)
+**Priority:** Medium
+**Effort:** Low
+**Why:** Code supports key rotation but no documentation
+**Action:**
+- Document URL_TOKEN_KEYS rotation procedure
+- Document DATABASE_ENCRYPTION_KEY rotation
+- Add runbook for emergency key rotation
+
+---
+
+### 🔲 Implement Health Checks with /readyz
+**Priority:** High
+**Effort:** Low
+**Why:** Already referenced in Helm values but not implemented in apps
+**Action:**
+- Add `/healthz` and `/readyz` endpoints to all services
+- `/healthz`: Liveness check (service is running)
+- `/readyz`: Readiness check (database connected, dependencies available)
 
 ---
 
 ### 🔲 Add Horizontal Pod Autoscaling
-**Priority:** Medium  
-**Effort:** Low  
-**Why:** Currently using fixed replicas, HPA would optimize costs and handle traffic spikes  
-**Action:** Add HPA resources to Helm templates with CPU-based scaling
+**Priority:** Medium
+**Effort:** Low
+**Why:** Fixed replicas don't scale with load
+**Action:**
+- Add HPA resources to Helm chart
+- Scale gateway and event-collector based on CPU/RPS
+- Keep control-plane and worker at fixed replicas
 
 ---
 
-### 🔲 Implement Health Checks
-**Priority:** High  
-**Effort:** Low  
-**Why:** Kubernetes doesn't know when pods are actually ready to serve traffic  
-**Action:** Add `livenessProbe` and `readinessProbe` to deployment templates
+### 🔲 Implement Request Tracing
+**Priority:** Medium
+**Effort:** Medium
+**Why:** Difficult to trace requests across 4 services
+**Action:**
+- Use `X-Request-ID` header throughout
+- Propagate trace context to all services
+- Log trace ID in all log statements
 
-```yaml
-livenessProbe:
-  httpGet:
-    path: /health
-    port: 3000
-  initialDelaySeconds: 30
-  periodSeconds: 10
-readinessProbe:
-  httpGet:
-    path: /ready
-    port: 3000
-  initialDelaySeconds: 5
-  periodSeconds: 5
+---
+
+### 🔲 Add Cost Attribution
+**Priority:** High (business value)
+**Effort:** Medium
+**Why:** Ledger tracks costs but no attribution to projects/users
+**Action:**
+- Link `ledger_events` to `billing_info` via `user_id`
+- Generate cost reports per customer
+- Calculate profit margins (revenue - COGS)
+
+---
+
+### 🔲 Implement Dead Letter Queue UI
+**Priority:** Low
+**Effort:** Medium
+**Why:** Failed classifications go to `classification_jobs_failed` with no visibility
+**Action:**
+- Add endpoint to query failed jobs
+- Add retry mechanism for transient failures
+- Alert on DLQ depth threshold
+
+---
+
+## 5. Architecture Overview
+
+### Service Topology
+
+```
+Client → Gateway (8787) → Portkey (in-process) → AI Providers
+            ↓ (presign)
+         Control Plane (8080) → PostgreSQL (api_clients, signed_url_replays)
+            ↓ (events)
+         Event Collector (8080) → PostgreSQL (ledger_events, classification_jobs)
+            ↓ (poll)
+         Worker (8080) → Meta Classifier API
+            ↓ (update)
+         PostgreSQL (classification_jobs, ledger_events)
 ```
 
----
+### Database Schema Separation
 
-### 🔲 Add Resource Limits
-**Priority:** High  
-**Effort:** Low  
-**Why:** Currently no resource constraints, pods could consume excessive resources  
-**Action:** Already included in templates but should be tuned based on actual usage
+**Control Plane Tables:**
+- `api_clients` - API client credentials
+- `provider_credentials` - Provider API keys and virtual keys
+- `client_api_keys` - Temporary client-provided keys (encrypted)
+- `signed_url_replays` - Replay protection nonce tracking
+- `provider_models` - Supported models per provider
 
-```yaml
-resources:
-  requests:
-    memory: "128Mi"
-    cpu: "100m"
-  limits:
-    memory: "256Mi"
-    cpu: "200m"
-```
+**Ledger Tables:**
+- `ledger_events` - Usage events (run_id, action_type, costs)
+- `classification_jobs` - Unlogged queue for meta-classification
+- `classification_jobs_failed` - Dead letter queue
+- `billing_info`, `project`, `billing_rate`, `billing_record`, `invoice`
 
----
-
-### 🔲 Implement Monitoring
-**Priority:** High  
-**Effort:** Medium  
-**Why:** No visibility into application performance or errors  
-**Action:** 
-- Enable Google Cloud Monitoring
-- Add Prometheus metrics endpoint to apps
-- Set up dashboards and alerts
-
----
-
-### 🔲 Add Valkey/Redis Connection
-**Priority:** High (if Valkey is being used)  
-**Effort:** Medium  
-**Why:** User mentioned Valkey as the reason for choosing GKE  
-**Action:** Add Memorystore for Redis to Terraform, inject connection details into pods
-
----
-
-### 🔲 Implement CI/CD Pipeline
-**Priority:** Low  
-**Effort:** Medium  
-**Why:** Currently manual deploys from laptop, could automate with GitHub Actions  
-**Action:** Add `.github/workflows/deploy.yml` for automated deployments on push
-
----
-
-### 🔲 Add Network Policies
-**Priority:** Medium  
-**Effort:** Medium  
-**Why:** Currently no network segmentation between pods  
-**Action:** Implement NetworkPolicy resources to restrict pod-to-pod communication
-
----
-
-### 🔲 Implement Secrets Management
-**Priority:** High  
-**Effort:** Medium  
-**Why:** No secure way to inject API keys, database passwords, etc.  
-**Action:** 
-- Use Google Secret Manager
-- Integrate with Kubernetes secrets
-- Use Workload Identity for secret access
-
----
-
-### 🔲 Add Backup and Disaster Recovery
-**Priority:** Medium  
-**Effort:** Low  
-**Why:** No automated backup of Kubernetes resources  
-**Action:** 
-- Set up automated `kubectl` backups
-- Document recovery procedures
-- Consider Velero for comprehensive backup solution
-
----
-
-### 🔲 Cost Monitoring and Alerts
-**Priority:** Medium  
-**Effort:** Low  
-**Why:** No visibility into actual costs  
-**Action:** Set up budget alerts in GCP, monitor GKE and Cloud Build costs
-
----
-
-### 🔲 Multi-Region Deployment
-**Priority:** Low  
-**Effort:** High  
-**Why:** Single region means potential downtime during regional outages  
-**Action:** Deploy to multiple regions with global load balancing (complex, only if needed)
-
----
-
-## 5. Documentation
-
-### External Documentation Links
-- [GKE Documentation](https://cloud.google.com/kubernetes-engine/docs)
-- [Skaffold Documentation](https://skaffold.dev/docs/)
-- [Helm Documentation](https://helm.sh/docs/)
-- [Terraform GCP Provider](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
-- [Google Managed Certificates](https://cloud.google.com/kubernetes-engine/docs/how-to/managed-certs)
-- [Container-Native Load Balancing](https://cloud.google.com/kubernetes-engine/docs/how-to/container-native-load-balancing)
-
-### Internal Documentation Files
-
-| File | Purpose |
-|------|---------|
-| `deploy/gke/terraform/README.md` | Terraform setup and usage guide |
-| `deploy/gke/package.json` | npm scripts documentation via script names |
-| This `agents.md` | Project decisions, lessons, and recommendations |
-| Main artifact from this conversation | Complete setup with all configurations |
+### Migration Tracking
+- `control_plane_schema_migrations` - Knex migration tracking
+- `ledger_schema_migrations` - Knex migration tracking
 
 ---
 
 ## 6. Source Files Worth Knowing
 
-### Infrastructure Files
+### Application Services
 
-| Path | Role / Highlights |
-|------|-------------------|
-| `deploy/gke/terraform/main.tf` | Terraform entry point, provider config, API enablement |
-| `deploy/gke/terraform/variables.tf` | All configurable parameters (project ID, region, cluster settings) |
-| `deploy/gke/terraform/terraform.tfvars` | **EDIT THIS**: Your actual values (project ID, domain, etc.) |
-| `deploy/gke/terraform/gke.tf` | GKE cluster definitions (main, dev, prod), node pools, config |
-| `deploy/gke/terraform/iam.tf` | Service account creation, IAM roles, key generation |
-| `deploy/gke/terraform/networking.tf` | Static IP reservation, GCR lifecycle policies |
-| `deploy/gke/terraform/outputs.tf` | Important values output after apply (IP, service account, etc.) |
-| `deploy/gke/terraform/.gitignore` | Protects sensitive files from Git commits |
+| Path | Role | Port |
+|------|------|------|
+| `apps/gateway/` | Gateway wrapper + Portkey | 8787 |
+| `apps/control-plane/` | Presign, credentials, models | 8080 |
+| `apps/event-collector/` | Ledger events + queue enqueue | 8080 |
+| `apps/worker/` | Classification queue processor | 8080 |
+| `apps/shared/` | Shared utilities (signedUrl, etc) | N/A |
+| `vendor/portkey-gateway/` | Vendored Portkey gateway | N/A |
 
-### Deployment Files
+### Key Implementation Files
 
-| Path | Role / Highlights |
-|------|-------------------|
-| `deploy/gke/skaffold.yaml` | **CORE**: Defines build (Cloud Build) and deploy (Helm) process |
-| `deploy/gke/deploy.sh` | **MAIN SCRIPT**: Authenticates, gets credentials, cleans up, deploys |
-| `deploy/gke/gcr-cleanup.sh` | Deletes old Docker images to minimize storage costs |
-| `deploy/gke/package.json` | npm scripts: `gae:deploy`, `gae:deploy:dev`, `gae:deploy:prod` |
-| `deploy/gke/.gitignore` | Prevents committing service account keys |
+| Path | Purpose |
+|------|---------|
+| `apps/gateway/src/app.ts` | Gateway request handler, signature validation, Portkey integration |
+| `apps/gateway/src/replayStore.ts` | PostgreSQL-backed replay protection |
+| `apps/control-plane/src/server.ts` | Presign endpoint, client API key storage |
+| `apps/control-plane/src/db.ts` | Database connection pooling |
+| `apps/event-collector/src/server.ts` | Event ingestion, classification queue |
+| `apps/worker/src/worker.ts` | Job polling, classification, ledger updates |
+| `apps/worker/src/queue.ts` | Classification queue operations |
+| `apps/shared/src/signedUrl.ts` | URL signing, config encryption/decryption |
 
-### Helm Chart Files
+### Migrations
 
-| Path | Role / Highlights |
-|------|-------------------|
-| `deploy/gke/helm/honojs-api/Chart.yaml` | Helm chart metadata |
-| `deploy/gke/helm/honojs-api/values.yaml` | **EDIT THIS**: Domain, per-service replicas, ports, and env/secret wiring |
-| `deploy/gke/helm/honojs-api/templates/deployment.yaml` | Deployments for gateway/control-plane/event-collector/worker |
-| `deploy/gke/helm/honojs-api/templates/service.yaml` | Services (NEG-enabled where appropriate) feeding ingress |
-| `deploy/gke/helm/honojs-api/templates/ingress.yaml` | Ingress with static IP and Google-managed certificate references |
-| `deploy/gke/helm/honojs-api/templates/managed-certificate.yaml` | Google-managed SSL certificate definition |
+| Path | Purpose |
+|------|---------|
+| `apps/control-plane/knex/migrations/20250101000000_initial_schema.js` | Initial control-plane schema |
+| `apps/control-plane/knex/migrations/20251022000000_add_client_api_keys.js` | Client-provided API keys table |
+| `apps/ledger/knex/migrations/20250101000000_initial_schema.js` | Ledger + classification_jobs tables |
+| `apps/ledger/knex/migrations/20251021170000_add_failed_jobs_table.js` | Dead letter queue |
 
-> **Secrets:** The Helm chart expects a `stringcost-config` secret with `database_url`, `classifier_endpoint`, and `classifier_api_key` keys. See `deploy/gke/README.md` for the exact `kubectl create secret` command.
+### Tests
 
-### Application Files (Example Structure)
+| Path | Tests |
+|------|-------|
+| `tests/control-plane/urlToken.test.ts` | URL token signing/verification |
+| `tests/control-plane/client_api_keys.test.ts` | Client key encryption/storage |
+| `tests/control-plane/presign.api.test.ts` | Presign API integration (13 tests) |
+| `tests/gateway/wrapper.test.ts` | Gateway wrapper unit tests |
+| `tests/gateway/gateway.api.test.ts` | Gateway API integration (6 tests) |
+| `tests/ledger/migrations.test.ts` | Ledger schema migrations |
+| `tests/ledger/worker.test.ts` | Worker queue processing |
+| `tests/langchain/proxy.test.ts` | End-to-end LangChain integration |
 
-| Path | Role / Highlights |
-|------|-------------------|
-| `api-1/Dockerfile` | Container image definition for api-1 service |
-| `api-1/package.json` | Node.js dependencies and scripts for api-1 |
-| `api-1/src/` | Application source code for api-1 |
-| _(Same structure for api-2 through api-5)_ | |
+### Docker & Build
 
-### Key Configuration Points
+| Path | Purpose |
+|------|---------|
+| `apps/gateway/Dockerfile` | Multi-stage build (builds portkey-gateway) |
+| `apps/control-plane/Dockerfile` | Multi-stage build |
+| `apps/event-collector/Dockerfile` | Multi-stage build |
+| `apps/worker/Dockerfile` | Multi-stage build |
+| `apps/*/build.mjs` | esbuild configuration (packages: 'external') |
+| `.dockerignore` | Excludes node_modules, dist, .git from builds |
+| `scripts/smoke-test-build.sh` | CI-style build test (no Docker) |
+| `scripts/smoke-test-docker.sh` | Docker build test (all 4 images) |
 
-#### Must Edit Before First Use
-1. `deploy/gke/terraform/terraform.tfvars` - Your GCP project ID and domain
-2. `deploy/gke/helm/honojs-api/values.yaml` - Your domain name
-3. `deploy/gke/deploy.sh` - Cluster name and region (if different from defaults)
+### Kubernetes Deployment
 
-#### Auto-Generated (Don't Edit Manually)
-1. `deploy/gke/gke-deployer-key.json` - Created by Terraform
-2. `deploy/gke/terraform/terraform.tfstate` - Managed by Terraform
-3. `deploy/gke/terraform/.terraform/` - Terraform plugins and cache
+| Path | Purpose |
+|------|---------|
+| `deploy/gke/skaffold.yaml` | Build (Cloud Build) + deploy (Helm) |
+| `deploy/gke/deploy.sh` | Main deployment script |
+| `deploy/gke/helm/honojs-api/values.yaml` | Service configs, env vars, secrets |
+| `deploy/gke/helm/honojs-api/templates/deployment.yaml` | Kubernetes Deployments |
+| `deploy/gke/helm/honojs-api/templates/service.yaml` | Kubernetes Services |
+| `deploy/gke/helm/honojs-api/templates/ingress.yaml` | GCE Ingress with path routing |
+| `deploy/gke/helm/honojs-api/templates/migration-job.yaml` | Pre-install/pre-upgrade migration Job |
+| `deploy/gke/DEPLOYMENT.md` | Complete deployment guide |
 
-#### Networking Flow
-```
-Ingress (ingress.yaml) 
-  ↓ references
-ManagedCertificate (managed-certificate.yaml)
-  ↓ uses domain from
-values.yaml
-  ↓ routes to
-Service (service.yaml) with NEG annotation
-  ↓ load balances to
-Deployment (deployment.yaml) pods
-  ↓ running images from
-Skaffold build (skaffold.yaml)
-  ↓ using source from
-api-*/Dockerfile
-```
+### Documentation
 
-#### Deployment Flow
-```
-npm run gae:deploy
-  ↓ runs
-deploy.sh
-  ↓ authenticates with
-gke-deployer-key.json (from Terraform)
-  ↓ executes
-skaffold run
-  ↓ reads
-skaffold.yaml
-  ↓ uploads code to
-Google Cloud Build
-  ↓ builds images, pushes to GCR
-  ↓ deploys with
-Helm (using templates)
-  ↓ applies to
-GKE cluster
-```
+| Path | Purpose |
+|------|---------|
+| `README.md` | Main documentation, API usage, Quick Start |
+| `PLAN.md` | Implementation plan, issue tracking (17/20 complete) |
+| `agents.md` | This file - decisions, lessons, architecture |
+| `deploy/gke/DEPLOYMENT.md` | Kubernetes deployment guide |
 
 ---
 
-## Quick Start Checklist
+## 7. Environment Variables Reference
 
+### Gateway
+- `PORT` - Container port (default: 8787)
+- `CONTROL_PLANE_URL` - Internal control plane URL
+- `URL_TOKEN_KEYS` - HMAC signing keys (comma-separated)
+- `SIGNED_URL_DATABASE_URL` - PostgreSQL for replay protection
+- `DISABLE_RATE_LIMITING` - Set to "true" in tests/dev
+
+### Control Plane
+- `PORT` - Container port (default: 8080)
+- `DATABASE_URL` - PostgreSQL connection string
+- `DATABASE_ENCRYPTION_KEY` - For encrypting client API keys (pgcrypto)
+- `URL_TOKEN_KEYS` - HMAC signing keys (must match gateway)
+- `GATEWAY_BASE_URL` - Public gateway URL for presign responses
+- `DISABLE_RATE_LIMITING` - Set to "true" in tests/dev
+
+### Event Collector
+- `PORT` - Container port (default: 8080)
+- `DATABASE_URL` - PostgreSQL connection string
+- `DISABLE_RATE_LIMITING` - Set to "true" in tests/dev
+
+### Worker
+- `PORT` - Container port (default: 8080)
+- `DATABASE_URL` - PostgreSQL connection string
+- `META_LLM_CLASSIFIER_ENDPOINT` - Meta classifier API URL
+- `META_LLM_API_KEY` - Meta classifier API key
+- `WORKER_POLL_INTERVAL_MS` - Queue polling interval (default: 200)
+
+---
+
+## 8. Quick Start Checklist
+
+### Local Development
+- [ ] Install: Node.js 20+, Docker (for tests), PostgreSQL 16
+- [ ] Clone: `git clone https://github.com/stringcost/stringcost.git`
+- [ ] Install: `npm install --no-audit --no-fund`
+- [ ] Setup: Copy `.env.example`, configure `DATABASE_URL`
+- [ ] Migrate: `npm run db:migrate`
+- [ ] Seed: `npm run db:seed` (optional demo data)
+- [ ] Test: `TESTCONTAINERS_RYUK_DISABLED=true npm test`
+- [ ] Build: `npm run build`
+- [ ] Smoke Test: `npm run smoke-test`
+
+### GKE Deployment
 - [ ] Install: `terraform`, `gcloud`, `kubectl`, `skaffold`, `helm`
 - [ ] Authenticate: `gcloud auth application-default login`
-- [ ] Edit: `deploy/gke/terraform/terraform.tfvars` (project ID, domain)
-- [ ] Run: `cd deploy/gke/terraform && terraform init && terraform apply`
-- [ ] Note static IP from output
-- [ ] Add DNS A record at your domain registrar
-- [ ] Create `stringcost-config` secret (`database_url`, `classifier_endpoint`, `classifier_api_key`)
-- [ ] Edit: `deploy/gke/helm/honojs-api/values.yaml` (domain, env overrides)
-- [ ] Run: `cd deploy/gke && chmod +x *.sh && npm run gae:deploy`
-- [ ] Wait 15-60 min for SSL certificate
-- [ ] Check: `npm run check-cert`
-- [ ] Done! Your services are live at `https://yourdomain.com/llm`, `/control`, and `/events` (the worker remains internal).
+- [ ] Provision: `cd deploy/gke/terraform && terraform apply`
+- [ ] DNS: Add A record pointing to static IP
+- [ ] Secrets: Create `stringcost-config` Kubernetes secret
+- [ ] Deploy: `npm run gke:deploy`
+- [ ] Verify: `kubectl get pods && kubectl logs job/honojs-apis-migrations-1`
+- [ ] Wait: 15-60 min for SSL certificate provisioning
+- [ ] Test: `curl https://yourdomain.com/llm/health`
 
 ---
 
 ## Contact & Support
 
 For issues or questions:
-1. Check the troubleshooting section in the main artifact
-2. Review GKE/Skaffold/Helm documentation
-3. Check `kubectl get events` for Kubernetes issues
-4. Review `gcloud builds list` for build failures
-5. Use `kubectl logs` to debug application issues
+1. Check troubleshooting sections in `README.md` and `DEPLOYMENT.md`
+2. Review test suite for usage examples
+3. Check `kubectl logs` for runtime issues
+4. Check `kubectl get events` for Kubernetes issues
+5. Review migration Job logs: `kubectl logs job/honojs-apis-migrations-<revision>`
 
 ---
 
-*Last Updated: 2025-10-19*  
-*Project: GKE Deployment Setup for 5 HonoJS APIs*  
-*Architecture: GKE Standard + Skaffold + Helm + Terraform (local state)*
+*Architecture: 4 Microservices (Gateway, Control Plane, Event Collector, Worker)*
+*Database: PostgreSQL 16 with Knex migrations*
+*Gateway: Vendored Portkey supporting 250+ LLM providers*
+*Deployment: GKE + Helm + Skaffold with automatic migrations*

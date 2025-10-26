@@ -99,3 +99,13 @@ services:
           secretKeyRef:
             name: stringcost-config
             key: classifier_api_key
+
+
+# Global Helm settings
+imageTag: latest
+imagePullPolicy: IfNotPresent
+secretName: stringcost-config
+
+# Run database migrations as a pre-install/pre-upgrade Kubernetes Job
+# This ensures classification_jobs and other tables exist before services start
+runMigrations: true

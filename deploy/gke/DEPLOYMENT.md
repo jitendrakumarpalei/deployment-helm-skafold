@@ -172,9 +172,87 @@ kubectl get ingress
 kubectl describe managedcertificate honojs-apis-cert
 ```
 
-## Step 5: Run Database Migrations
+## Step 5: Database Migrations
 
-Migrations must be run manually before first deployment:
+### Automatic Migrations (Recommended)
+
+By default, migrations run automatically as a **Kubernetes Job** before deployment:
+
+```yaml
+# In values.yaml (enabled by default)
+runMigrations: true
+```
+
+The migration Job:
+- ✅ Runs as a `pre-install` and `pre-upgrade` Helm hook
+- ✅ Creates all tables including `classification_jobs` (required by worker)
+- ✅ Executes both control-plane and ledger migrations
+- ✅ **100% IDEMPOTENT** - Safe to run multiple times (Knex tracks applied migrations)
+- ✅ Fails deployment if migrations fail (safe rollback)
+- ✅ Auto-deletes after 5 minutes
+
+### Migration Safety & Idempotency
+
+**Q: What if I destroy my K8s cluster but keep the same database?**
+
+✅ **Safe!** Knex tracks applied migrations in these tables:
+- `control_plane_schema_migrations` - Tracks control-plane migrations
+- `ledger_schema_migrations` - Tracks ledger migrations
+
+When you redeploy:
+1. Migration Job runs `npm run migrate:control-plane` and `npm run migrate:ledger`
+2. Knex checks which migrations already ran
+3. Only NEW migrations are applied
+4. Already-applied migrations are skipped
+5. Your data is preserved
+
+**Q: What if I add new migrations locally and deploy?**
+
+✅ **Automatic!** The migration Job will:
+1. Detect new migration files (by timestamp in filename)
+2. Apply only the new migrations
+3. Skip migrations that already ran
+4. Update tracking tables
+
+**Example workflow:**
+```bash
+# 1. Add new migration locally
+cd apps/control-plane
+npx knex migrate:make add_new_feature
+
+# 2. Write migration in knex/migrations/20251026000000_add_new_feature.js
+# ...
+
+# 3. Deploy to K8s (migration runs automatically)
+npm run gke:deploy
+
+# 4. Verify migration ran
+kubectl logs job/honojs-apis-migrations-<revision>
+# You'll see: "Batch 2 run: 1 migrations"
+```
+
+**To check migration status:**
+```bash
+# Watch migration Job
+kubectl get jobs | grep migration
+kubectl logs job/honojs-apis-migrations-<revision>
+
+# Check which migrations have run
+kubectl exec -it deployment/control-plane -- node -e "
+  const knex = require('knex')({
+    client: 'pg',
+    connection: process.env.DATABASE_URL
+  });
+  knex('control_plane_schema_migrations').select('*').then(console.log).finally(() => knex.destroy());
+"
+
+# Verify tables exist
+kubectl exec -it deployment/control-plane -- psql $DATABASE_URL -c "\dt"
+```
+
+### Manual Migrations (If Needed)
+
+If you disabled automatic migrations (`runMigrations: false`), run them manually:
 
 ```bash
 # Port-forward to control-plane
@@ -255,6 +333,29 @@ All services receive these environment variables from Helm values and Kubernetes
 - `META_LLM_API_KEY` - Classifier API key
 
 ## Troubleshooting
+
+### Worker: "relation classification_jobs does not exist"
+
+**Cause:** Migrations didn't run or failed
+
+**Solution:**
+```bash
+# 1. Check if migration Job ran
+kubectl get jobs | grep migration
+kubectl logs job/honojs-apis-migrations-<revision>
+
+# 2. If Job failed, check the error
+kubectl describe job honojs-apis-migrations-<revision>
+
+# 3. If migrations never ran, check values.yaml
+# Ensure: runMigrations: true
+
+# 4. Manually trigger migrations if needed
+kubectl exec -it deployment/control-plane -- npm run db:migrate
+
+# 5. Verify table exists
+kubectl exec -it deployment/control-plane -- psql $DATABASE_URL -c "\d classification_jobs"
+```
 
 ### Pods not starting
 ```bash

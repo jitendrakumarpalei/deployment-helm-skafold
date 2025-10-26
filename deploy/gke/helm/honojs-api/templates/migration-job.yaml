@@ -1,0 +1,58 @@
+{{- if .Values.runMigrations }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Chart.Name }}-migrations-{{ .Release.Revision }}
+  labels:
+    app: {{ .Chart.Name }}
+    chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  ttlSecondsAfterFinished: 300
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}-migration
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migration-runner
+        image: control-plane
+        imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -e
+            echo "Running database migrations..."
+
+            # Run control-plane migrations (includes signed_url_replays, api_clients, etc)
+            echo "Running control-plane migrations..."
+            npm run migrate:control-plane
+
+            # Run ledger migrations (includes classification_jobs, ledger_events, etc)
+            echo "Running ledger migrations..."
+            npm run migrate:ledger
+
+            echo "Migrations completed successfully!"
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.secretName }}
+              key: database_url
+        - name: NODE_ENV
+          value: "production"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+{{- end }}
