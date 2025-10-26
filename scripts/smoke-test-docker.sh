@@ -125,6 +125,92 @@ test_image() {
     fi
 }
 
+# Function to test migrations (only for control-plane)
+test_migrations() {
+    local service=$1
+    local image_name="stringcost-${service}:smoke-test"
+
+    # Only test migrations for control-plane (which runs both control-plane and ledger migrations)
+    if [ "$service" != "control-plane" ]; then
+        return 0
+    fi
+
+    echo ""
+    print_status "INFO" "Testing migration commands for $service..."
+
+    # Test that tsx is available
+    if docker run --rm "$image_name" which tsx > /dev/null 2>&1; then
+        print_status "OK" "tsx is available"
+    else
+        print_status "FAIL" "tsx not found in image"
+        return 1
+    fi
+
+    # Test that knex is available
+    if docker run --rm "$image_name" sh -c "ls node_modules/.bin/knex" > /dev/null 2>&1; then
+        print_status "OK" "knex is available"
+    else
+        print_status "FAIL" "knex not found in image"
+        return 1
+    fi
+
+    # Test that migration files exist
+    if docker run --rm "$image_name" sh -c "ls apps/control-plane/knex/migrations/*.js" > /dev/null 2>&1; then
+        print_status "OK" "control-plane migration files exist"
+    else
+        print_status "FAIL" "control-plane migration files missing"
+        return 1
+    fi
+
+    if docker run --rm "$image_name" sh -c "ls apps/ledger/knex/migrations/*.js" > /dev/null 2>&1; then
+        print_status "OK" "ledger migration files exist"
+    else
+        print_status "FAIL" "ledger migration files missing"
+        return 1
+    fi
+
+    # Test that knexfile.ts exists
+    if docker run --rm "$image_name" sh -c "test -f apps/control-plane/knexfile.ts && test -f apps/ledger/knexfile.ts" > /dev/null 2>&1; then
+        print_status "OK" "knexfile.ts files exist"
+    else
+        print_status "FAIL" "knexfile.ts files missing"
+        return 1
+    fi
+
+    # Test that the migration command can be invoked (dry run - check syntax)
+    if docker run --rm "$image_name" sh -c "npm run migrate:control-plane --help 2>&1 | grep -q 'migrate'" > /dev/null 2>&1; then
+        print_status "OK" "migration command is valid"
+    else
+        print_status "FAIL" "migration command failed"
+        return 1
+    fi
+
+    # Test that src/ directories exist (needed by knexfile.ts imports)
+    if docker run --rm "$image_name" sh -c "test -d apps/control-plane/src && test -f apps/control-plane/src/knexConfig.ts" > /dev/null 2>&1; then
+        print_status "OK" "control-plane src/ directory exists"
+    else
+        print_status "FAIL" "control-plane src/ directory or knexConfig.ts missing"
+        return 1
+    fi
+
+    if docker run --rm "$image_name" sh -c "test -d apps/ledger/src && test -f apps/ledger/src/knexConfig.ts" > /dev/null 2>&1; then
+        print_status "OK" "ledger src/ directory exists"
+    else
+        print_status "FAIL" "ledger src/ directory or knexConfig.ts missing"
+        return 1
+    fi
+
+    # Test that workspace tsconfig.json files exist (needed by tsx)
+    if docker run --rm "$image_name" sh -c "test -f apps/control-plane/tsconfig.json && test -f apps/ledger/tsconfig.json" > /dev/null 2>&1; then
+        print_status "OK" "workspace tsconfig.json files exist"
+    else
+        print_status "FAIL" "workspace tsconfig.json files missing"
+        return 1
+    fi
+
+    return 0
+}
+
 # Function to verify image contents
 verify_image_contents() {
     local service=$1
@@ -176,8 +262,12 @@ successful_services=()
 for service in "${SERVICES[@]}"; do
     if build_service "$service"; then
         if verify_image_contents "$service"; then
-            if test_image "$service"; then
-                successful_services+=("$service")
+            if test_migrations "$service"; then
+                if test_image "$service"; then
+                    successful_services+=("$service")
+                else
+                    failed_services+=("$service")
+                fi
             else
                 failed_services+=("$service")
             fi

@@ -222,6 +222,99 @@ test_service_start() {
     fi
 }
 
+# Function to test migrations (only for control-plane)
+test_migrations() {
+    local service=$1
+
+    # Only test migrations for control-plane (which runs both control-plane and ledger migrations)
+    if [ "$service" != "control-plane" ]; then
+        return 0
+    fi
+
+    print_status "INFO" "Testing migration infrastructure for $service..."
+
+    # Test that tsx is available
+    if [ -x "node_modules/.bin/tsx" ]; then
+        print_status "OK" "tsx is available"
+    else
+        print_status "FAIL" "tsx not found in node_modules/.bin"
+        return 1
+    fi
+
+    # Test that knex is available
+    if [ -x "node_modules/.bin/knex" ]; then
+        print_status "OK" "knex is available"
+    else
+        print_status "FAIL" "knex not found in node_modules/.bin"
+        return 1
+    fi
+
+    # Test that migration files exist
+    if ls apps/control-plane/knex/migrations/*.js >/dev/null 2>&1; then
+        print_status "OK" "control-plane migration files exist"
+    else
+        print_status "FAIL" "control-plane migration files missing"
+        return 1
+    fi
+
+    if ls apps/ledger/knex/migrations/*.js >/dev/null 2>&1; then
+        print_status "OK" "ledger migration files exist"
+    else
+        print_status "FAIL" "ledger migration files missing"
+        return 1
+    fi
+
+    # Test that knexfile.ts exists
+    if [ -f "apps/control-plane/knexfile.ts" ] && [ -f "apps/ledger/knexfile.ts" ]; then
+        print_status "OK" "knexfile.ts files exist"
+    else
+        print_status "FAIL" "knexfile.ts files missing"
+        return 1
+    fi
+
+    # Test that tsconfig.base.json exists (needed by tsx)
+    if [ -f "tsconfig.base.json" ]; then
+        print_status "OK" "tsconfig.base.json exists"
+    else
+        print_status "FAIL" "tsconfig.base.json missing"
+        return 1
+    fi
+
+    # Test that the npm scripts are defined in package.json
+    if grep -q '"migrate:control-plane"' package.json && grep -q '"migrate:ledger"' package.json; then
+        print_status "OK" "migration npm scripts are defined"
+    else
+        print_status "FAIL" "migration npm scripts missing in package.json"
+        return 1
+    fi
+
+    # Test that src/ directories exist (needed by knexfile.ts imports)
+    if [ -d "apps/control-plane/src" ] && [ -f "apps/control-plane/src/knexConfig.ts" ]; then
+        print_status "OK" "control-plane src/ directory exists"
+    else
+        print_status "FAIL" "control-plane src/ directory or knexConfig.ts missing"
+        return 1
+    fi
+
+    if [ -d "apps/ledger/src" ] && [ -f "apps/ledger/src/knexConfig.ts" ]; then
+        print_status "OK" "ledger src/ directory exists"
+    else
+        print_status "FAIL" "ledger src/ directory or knexConfig.ts missing"
+        return 1
+    fi
+
+    # Test that workspace tsconfig.json files exist (needed by tsx)
+    if [ -f "apps/control-plane/tsconfig.json" ] && [ -f "apps/ledger/tsconfig.json" ]; then
+        print_status "OK" "workspace tsconfig.json files exist"
+    else
+        print_status "FAIL" "workspace tsconfig.json files missing"
+        return 1
+    fi
+
+    print_status "OK" "All migration infrastructure verified"
+    return 0
+}
+
 # Main execution
 echo ""
 echo "=================================================="
@@ -239,8 +332,12 @@ for service in "${SERVICES[@]}"; do
 
     if build_service "$service"; then
         if verify_artifacts "$service"; then
-            if test_service_start "$service"; then
-                successful_services+=("$service")
+            if test_migrations "$service"; then
+                if test_service_start "$service"; then
+                    successful_services+=("$service")
+                else
+                    failed_services+=("$service")
+                fi
             else
                 failed_services+=("$service")
             fi

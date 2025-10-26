@@ -265,6 +265,52 @@
 
 ---
 
+### Pain Point 7: Smoke Tests Not Testing Migrations
+**Issue:** control-plane Docker image had multiple migration failures in sequence
+**Impact:** Kubernetes migration Job failing with multiple errors:
+1. "tsx not found"
+2. After fixing tsx: "required configuration option 'client' is missing"
+
+**Root Cause:** Development environment (where tests run) had all dev dependencies, but production Docker image stripped them. Smoke tests never replicated the production build.
+
+**How It Slipped Through:**
+- Development: `npm test` and `npm run migrate:*` worked fine (has all dev dependencies + source files)
+- Production Docker: Dockerfile had `npm prune --omit=dev` which removed tsx
+- Production Docker: Only copied `dist/`, not `src/` - knexfile.ts imports from `./src/knexConfig`
+- Production Docker: Missing COPY commands for knex/ directories, knexfile.ts, tsconfig.json
+- CI smoke test (`npm run smoke-test`) built in development mode, not production mode
+- Docker smoke test (`npm run docker:smoke-test`) only tested service startup CMD, not migrations
+- **Key insight:** We never tested migrations with the same build process that production uses
+
+**The Sequential Failures:**
+1. **First error:** "tsx not found" - dev dependency stripped by Docker
+2. **After fixing tsx:** "client is missing" - knexfile.ts imports `./src/knexConfig` but only `dist/` was copied
+3. **Root problem:** TypeScript knexfile imports source files, but Docker only has compiled dist
+
+**Solution:**
+- **Dockerfile fix (`apps/control-plane/Dockerfile`):**
+  - Removed `npm prune --omit=dev` to keep tsx/knex
+  - Added COPY for `src/` directories (control-plane and ledger) - needed by knexfile.ts imports
+  - Added COPY for `tsconfig.json` (both workspaces) - needed by tsx
+  - Added COPY for migration files and knexfiles (both control-plane and ledger)
+  - Added COPY for `tsconfig.base.json` (root) - needed by tsx
+- **CI smoke test fix (`scripts/smoke-test-build.sh`):**
+  - Added `test_migrations()` function that verifies:
+    - tsx, knex binaries exist
+    - Migration files, knexfiles exist
+    - `src/` directories and `src/knexConfig.ts` exist (for knexfile.ts imports)
+    - `tsconfig.json` files exist (for tsx)
+    - npm scripts are defined
+  - Runs after build but before service start test
+  - Only runs for control-plane (which handles both migrations)
+- **Docker smoke test fix (`scripts/smoke-test-docker.sh`):**
+  - Added similar `test_migrations()` function for Docker images
+  - Validates all migration infrastructure inside Docker container
+
+**Lesson:** Tests must use the SAME build process as production. TypeScript files in production images need their source dependencies, not just compiled output. Development environment != Production environment.
+
+---
+
 ## 3. What Went Well
 
 ### ✅ Vendored Portkey Gateway Integration
