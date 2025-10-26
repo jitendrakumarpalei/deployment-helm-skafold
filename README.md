@@ -17,7 +17,6 @@ graph TB
     subgraph "GKE Cluster / Cloud Run"
         subgraph "Gateway Service :8787"
             Gateway[Gateway<br/>apps/gateway<br/>Rate Limited]
-            Portkey[Vendored Portkey<br/>vendor/portkey-gateway<br/>In-Process]
             ReplayStore[(Replay Store<br/>signed_url_replays)]
         end
 
@@ -49,13 +48,13 @@ graph TB
 
     Client -->|3. POST signed URL<br/>Bearer sk-openai-xxx| Gateway
     Gateway -->|Verify signature<br/>Check replay| ReplayStore
-    Gateway -->|Decrypt config<br/>Forward request| Portkey
+    Gateway -->|Proxy to provider| OpenAI
+    Gateway -->|Proxy to provider| Anthropic
+    Gateway -->|Proxy to provider| Other
 
-    Portkey -->|Proxy to provider| OpenAI
-    Portkey -->|Proxy to provider| Anthropic
-    Portkey -->|Proxy to provider| Other
-
-    Portkey -.->|Provider response| Gateway
+    OpenAI -.->|Provider response| Gateway
+    Anthropic -.->|Provider response| Gateway
+    Other -.->|Provider response| Gateway
     Gateway -.->|4. Return response| Client
     Gateway -->|5. POST /events<br/>Write ledger event| EventCollector
 
@@ -81,7 +80,7 @@ graph TB
     classDef workerStyle fill:#fce4ec,stroke:#880e4f,stroke-width:2px
 
     class Client clientStyle
-    class Gateway,ControlPlane,EventCollector,Portkey serviceStyle
+    class Gateway,ControlPlane,EventCollector serviceStyle
     class Postgres,CredStore,ReplayStore,ClassQueue dbStyle
     class OpenAI,Anthropic,Other,Classifier externalStyle
     class Worker workerStyle
@@ -89,32 +88,23 @@ graph TB
 
 ## 📋 Service Summary
 
-This repository vendors the [Portkey](https://github.com/Portkey-AI/gateway) gateway and wraps it with the StringCost control plane, event collector, and billing ledger. The wrapper keeps Portkey unmodified while exposing brand-neutral APIs (`/llm/*`, `/control/*`, `/events/*`) and feeding usage data into our double-entry ledger.
+StringCost is a multi-LLM gateway with cost tracking and billing. It provides a unified API for 250+ LLM providers (OpenAI, Anthropic, Google Gemini, Cohere, Azure, etc.) with built-in usage metering and a double-entry ledger.
 
-- **Gateway** (`apps/gateway`) – Hono app that authenticates requests, fetches provider configuration from the control plane, normalises it into the Portkey format, then calls the vendored gateway in-process. All public endpoints live under `/llm/v1/*`.
+- **Gateway** (`apps/gateway`) – Authenticates requests via signed URLs, proxies to LLM providers, and supports OpenAI-compatible API format. All public endpoints live under `/llm/v1/*`.
 - **Control Plane** (`apps/control-plane`) – Issues API keys, stores provider credentials/virtual keys, and advertises the model catalogue. Exposed under `/control/v1` and `/control/v2`.
 - **Event Collector** (`apps/event-collector`) – Writes raw ledger events to Postgres and enqueues classification jobs in an `UNLOGGED` table (`classification_jobs`).
 - **Worker** (`apps/worker`) – Background process that drains `classification_jobs`, calls the meta classifier, and updates `ledger_events`.
-- **Vendored Portkey** (`vendor/portkey-gateway`) – Clean checkout of the upstream gateway. We keep the git metadata out of tree and pin the commit in `PORTKEY_TAG`.
 
-### 🚀 Portkey Integration Benefits
+### Key Features
 
-StringCost leverages **Portkey's AI gateway** to provide:
-
-- **250+ LLM providers** with unified OpenAI-compatible API (Google Gemini, Anthropic, Cohere, Azure, etc.)
-- **Automatic request transformation** – Use OpenAI format for all providers; Portkey handles the translation
-- **Built-in reliability** – Retries, fallbacks, load balancing, timeouts
-- **Advanced features**:
-  - Semantic caching for faster responses
-  - Guardrails for content filtering
-  - Real-time streaming
-  - Multimodal support (images, audio, video)
-- **Provider-specific capabilities**:
-  - **Gemini**: System prompt transformation, Google Search grounding, extended thinking mode
-  - **Anthropic**: Prompt caching, tool use
-  - **OpenAI**: Function calling, vision, audio
-
-All of this is available through StringCost's unified presign + signed URL flow with built-in cost tracking and billing.
+- **250+ LLM providers** with unified OpenAI-compatible API
+- **Signed URL authentication** – Time-limited access with replay protection
+- **Client-provided API keys** – Encrypted storage with PostgreSQL pgcrypto
+- **Usage metering** – Double-entry ledger with prompt classification
+- **Rate limiting** – Per-client rate limiting across all services
+- **Reliability** – Retries, fallbacks, load balancing, timeouts
+- **Streaming support** – Real-time streaming for all providers
+- **Multimodal** – Support for images, audio, video
 
 > **Base URLs (production)**  
 > Gateway: `https://api.stringcost.com/llm`  
@@ -153,14 +143,11 @@ export WORKER_POLL_INTERVAL_MS="200"
 
 # Optional: override replay store and canonical host configuration
 export SIGNED_URL_DATABASE_URL="$DATABASE_URL"
-
-# Optional legacy variables (used when running the vendored Portkey UI/plugins)
-export ALBUS_BASEPATH="$CONTROL_PLANE_URL"
 ```
 
 ### Run Database Migrations
 
-```
+```bash
 # Apply migrations for both databases
 DATABASE_URL=postgres://stringcost:stringcost@localhost:5432/stringcost npm run db:migrate
 
@@ -172,12 +159,27 @@ The seed scripts create a demo API client with OpenAI/Anthropic virtual keys and
 
 You can target individual services via `npm run migrate:control-plane` or `npm run migrate:ledger`. All scripts respect the `DATABASE_URL` environment variable.
 
+**Migrations are 100% idempotent** - Knex tracks applied migrations in `control_plane_schema_migrations` and `ledger_schema_migrations` tables, so running migrations multiple times is safe and only applies new migrations.
+
+#### Production Kubernetes Deployments
+
+In production (GKE/K8s), **migrations run automatically** as a Kubernetes Job via Helm pre-install/pre-upgrade hooks:
+
+- ✅ Runs before any service pods start
+- ✅ Uses the same control-plane image that Skaffold just built (guaranteed to have latest migrations)
+- ✅ Executes both `npm run migrate:control-plane` and `npm run migrate:ledger`
+- ✅ Idempotent - safe to run on every deployment
+- ✅ Fails the deployment if migrations fail (safe rollback)
+- ✅ Auto-deletes after 5 minutes (TTL)
+
+**Adding new migrations:** Just create the migration locally (`npx knex migrate:make <name>`) and deploy with `./deploy.sh`. The migration Job automatically detects and applies new migration files. See [deploy/gke/DEPLOYMENT.md](deploy/gke/DEPLOYMENT.md#step-5-database-migrations) for details.
+
 ### Start the Services Locally
 
 Each service is a small Hono app with a `dev` script:
 
 ```bash
-# Terminal 1 – gateway wrapper (+ vendored Portkey)
+# Terminal 1 – gateway service
 npm run dev --workspace @stringcost/gateway
 
 # Terminal 2 – control plane API
@@ -190,7 +192,7 @@ npm run dev --workspace @stringcost/event-collector
 npm run dev --workspace @stringcost/worker
 ```
 
-By default the gateway listens on `http://127.0.0.1:8787`. Adjust `CONTROL_PLANE_URL`/`ALBUS_BASEPATH` if you bind the control-plane to another port.
+By default the gateway listens on `http://127.0.0.1:8787`. Adjust `CONTROL_PLANE_URL` if you bind the control-plane to another port.
 
 ### Run the Test Suite
 
