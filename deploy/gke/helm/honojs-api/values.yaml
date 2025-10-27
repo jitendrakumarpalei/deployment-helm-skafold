@@ -31,7 +31,7 @@ services:
       - name: DISABLE_RATE_LIMITING
         value: "false"
   - name: control-plane
-    image: jitendrapalei/control-plane-service:latest
+    image: jitendrapalei/control-plane-service:v1
     replicas: 1
     containerPort: 8080
     ingressPath: /control

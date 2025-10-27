@@ -23,7 +23,7 @@ spec:
       restartPolicy: Never
       containers:
       - name: migration-runner
-        image: jitendrapalei/control-plane-service:latest
+        image: jitendrapalei/control-plane-service:v1
         imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
         command: ["/bin/sh", "-c"]
         args:
