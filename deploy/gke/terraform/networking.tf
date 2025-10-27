@@ -5,7 +5,7 @@ resource "google_compute_global_address" "ingress_ip" {
 }
 
 resource "google_storage_bucket" "gcr_artifacts" {
-  name          = "artifacts.${var.project_id}.appspot.com"
+  name          = "gcr-artifacts-stringcost-unique123"
   location      = "US"
   force_destroy = false
 

@@ -1,7 +1,7 @@
 # Edit these values for your environment
-project_id     = "your-gcp-project-id"
+project_id     = "stringcost"
 region         = "us-central1"
-domain         = "yourdomain.com"
+domain         = "test.local"
 
 # GKE cluster settings
 cluster_name   = "my-cluster"
