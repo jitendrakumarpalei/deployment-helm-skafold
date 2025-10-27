@@ -5,7 +5,7 @@ metadata:
   name: honojs-apis-ingress
   annotations:
     kubernetes.io/ingress.class: {{ .Values.ingress.className | quote }}
-    # kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.staticIpName | quote }}
+    kubernetes.io/ingress.global-static-ip-name: {{ .Values.ingress.staticIpName | quote }}
     # networking.gke.io/managed-certificates: "honojs-apis-cert"
     kubernetes.io/ingress.allow-http: "true"
 spec:
