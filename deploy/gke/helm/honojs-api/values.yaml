@@ -34,7 +34,7 @@ services:
     image: jitendrapalei/control-plane-service:v2
     replicas: 1
     containerPort: 8080
-    ingressPath: /v1
+    ingressPath: /control
     healthPath: /healthz
     readinessPath: /readyz
     env:
